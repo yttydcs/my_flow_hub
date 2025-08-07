@@ -6,6 +6,8 @@ import (
 	"myflowhub/poc/protocol"
 	"net/http"
 	"os"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +40,9 @@ type Server struct {
 	register   chan *Client
 	unregister chan *Client
 }
+
+// isValidVarName 检查变量名是否有效
+var isValidVarName = regexp.MustCompile(`^[\p{Han}A-Za-z0-9_]+$`).MatchString
 
 // NewServer 创建一个新的服务端实例
 func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
@@ -110,8 +115,8 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 	switch msg.Type {
 	case "var_update":
 		s.handleVarUpdate(sourceClient, msg)
-	case "var_get":
-		s.handleVarGet(sourceClient, msg)
+	case "vars_query":
+		s.handleVarsQuery(sourceClient, msg)
 	case "msg_send":
 		s.routeGenericMessage(sourceClient, msg)
 	default:
@@ -221,6 +226,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 		HardwareID:    payload.HardwareID,
 		SecretKeyHash: string(hashedSecret),
 		Role:          RoleNode,
+		Name:          payload.HardwareID, // Use hardware ID as name by default
 	}
 
 	if err := DB.Create(&newDevice).Error; err != nil {
@@ -253,53 +259,113 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 		return
 	}
 
-	targetDeviceID := msg.Target
-	if targetDeviceID == 0 {
-		targetDeviceID = client.deviceID
-	}
+	var updatedCount int
+	for fqdn, value := range variables { // fqdn: Fully Qualified Domain Name, e.g., "(hub-001).status"
+		var deviceIdentifier, varName string
+		hasDot := strings.Contains(fqdn, ".")
 
-	for key, value := range variables {
+		if hasDot {
+			parts := strings.SplitN(fqdn, ".", 2)
+			deviceIdentifier = parts[0]
+			varName = parts[1]
+		} else {
+			// Default to self
+			deviceIdentifier = fmt.Sprintf("[%d]", client.deviceID)
+			varName = fqdn
+		}
+
+		if !isValidVarName(varName) {
+			log.Warn().Str("varName", varName).Msg("无效的变量名，已跳过")
+			continue
+		}
+
+		var targetDevice Device
+		var err error
+
+		if strings.HasPrefix(deviceIdentifier, "[") && strings.HasSuffix(deviceIdentifier, "]") {
+			deviceIDStr := strings.Trim(deviceIdentifier, "[]")
+			err = DB.Where("device_uid = ?", deviceIDStr).First(&targetDevice).Error
+		} else if strings.HasPrefix(deviceIdentifier, "(") && strings.HasSuffix(deviceIdentifier, ")") {
+			deviceName := strings.Trim(deviceIdentifier, "()")
+			err = DB.Where("name = ?", deviceName).First(&targetDevice).Error
+		} else {
+			log.Warn().Str("identifier", deviceIdentifier).Msg("更新失败：无效的设备标识符格式")
+			continue
+		}
+
+		if err != nil {
+			log.Warn().Str("identifier", deviceIdentifier).Msg("更新失败：设备不存在")
+			continue
+		}
+
+		// TODO: Check permissions here
+
 		jsonValue, _ := json.Marshal(value)
 		variable := DeviceVariable{
-			OwnerDeviceID: targetDeviceID,
-			VariableName:  key,
+			OwnerDeviceID: targetDevice.ID,
+			VariableName:  varName,
 			Value:         datatypes.JSON(jsonValue),
 		}
-		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDeviceID, key).Assign(DeviceVariable{Value: datatypes.JSON(jsonValue)}).FirstOrCreate(&variable).Error; err != nil {
+		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDevice.ID, varName).Assign(DeviceVariable{Value: datatypes.JSON(jsonValue)}).FirstOrCreate(&variable).Error; err != nil {
 			log.Error().Err(err).Msg("更新变量失败")
+		} else {
+			updatedCount++
 		}
 	}
-	log.Info().Uint64("targetDeviceID", targetDeviceID).Msg("变量已更新")
+	log.Info().Int("count", updatedCount).Msg("变量已更新")
 }
 
-func (s *Server) handleVarGet(client *Client, msg protocol.BaseMessage) {
-	payload, ok := msg.Payload.(map[string]interface{})
-	if !ok {
-		return
-	}
+func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
+	var payload protocol.VarsQueryPayload
+	jsonPayload, _ := json.Marshal(msg.Payload)
+	json.Unmarshal(jsonPayload, &payload)
 
-	keys, ok := payload["keys"].([]interface{})
-	if !ok {
-		return
-	}
+	// 使用 slice 来保证返回顺序
+	results := make([]interface{}, len(payload.Queries))
 
-	targetDeviceID := msg.Target
-	if targetDeviceID == 0 {
-		targetDeviceID = client.deviceID
-	}
+	for i, query := range payload.Queries {
+		var deviceIdentifier, varName string
+		hasDot := strings.Contains(query, ".")
 
-	results := make(map[string]interface{})
-	for _, key_i := range keys {
-		key, ok := key_i.(string)
-		if !ok {
+		if hasDot {
+			parts := strings.SplitN(query, ".", 2)
+			deviceIdentifier = parts[0]
+			varName = parts[1]
+		} else {
+			// 不包含'.', 默认查询自身
+			deviceIdentifier = fmt.Sprintf("[%d]", client.deviceID)
+			varName = query
+		}
+
+		var targetDevice Device
+		var err error
+
+		if strings.HasPrefix(deviceIdentifier, "[") && strings.HasSuffix(deviceIdentifier, "]") {
+			deviceIDStr := strings.Trim(deviceIdentifier, "[]")
+			err = DB.Where("device_uid = ?", deviceIDStr).First(&targetDevice).Error
+		} else if strings.HasPrefix(deviceIdentifier, "(") && strings.HasSuffix(deviceIdentifier, ")") {
+			deviceName := strings.Trim(deviceIdentifier, "()")
+			err = DB.Where("name = ?", deviceName).First(&targetDevice).Error
+		} else {
+			// 如果格式不匹配，则此查询无效
+			log.Warn().Str("query", query).Msg("无效的查询格式")
+			results[i] = nil // 填充 nil 以保持顺序
+			continue
+		}
+
+		if err != nil {
+			log.Warn().Str("identifier", deviceIdentifier).Msg("查询失败：设备不存在")
+			results[i] = nil
 			continue
 		}
 
 		var variable DeviceVariable
-		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDeviceID, key).First(&variable).Error; err == nil {
+		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDevice.ID, varName).First(&variable).Error; err != nil {
+			results[i] = nil // 未找到变量
+		} else {
 			var val interface{}
 			json.Unmarshal(variable.Value, &val)
-			results[key] = val
+			results[i] = val
 		}
 	}
 
@@ -313,7 +379,7 @@ func (s *Server) handleVarGet(client *Client, msg protocol.BaseMessage) {
 			"success":     true,
 			"original_id": msg.ID,
 			"data": map[string]interface{}{
-				"variables": results,
+				"results": results, // 返回有序的 slice
 			},
 		},
 	}
@@ -345,11 +411,11 @@ func main() {
 
 	InitDatabase(dsn, postgresDsn, dbName)
 
-	hub := NewServer("", ":8080", "hub-hardware-id")
+	hub := NewServer("", ":8080", "hub-001")
 	go hub.Start()
 
 	if len(os.Args) > 1 && os.Args[1] == "relay" {
-		relay := NewServer("ws://localhost:8080/ws", ":8081", "relay-hardware-id-001")
+		relay := NewServer("ws://localhost:8080/ws", ":8081", "relay-001")
 		go relay.Start()
 	}
 

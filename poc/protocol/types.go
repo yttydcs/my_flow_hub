@@ -18,6 +18,12 @@ type AuthRequestPayload struct {
 	SecretKey string `json:"secretKey"`
 }
 
+// VarsQueryPayload is the payload for a vars_query request.
+type VarsQueryPayload struct {
+	// A list of queries, e.g., ["deviceA.online", "deviceB.temperature", "deviceC"]
+	Queries []string `json:"queries"`
+}
+
 // RegisterRequestPayload 是 register_request 消息的载荷
 type RegisterRequestPayload struct {
 	HardwareID string `json:"hardwareId"`

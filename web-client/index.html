@@ -15,7 +15,6 @@
         .log-entry.error { color: red; }
         .log-entry.system { color: purple; }
         input, button, textarea { padding: 0.5rem; width: 100%; box-sizing: border-box; }
-        .button-group { display: flex; gap: 0.5rem; }
     </style>
 </head>
 <body>
@@ -29,7 +28,7 @@
             <button id="connect-btn">Connect</button>
             <hr>
             <div>
-                <label for="hardware-id">My Hardware ID (for registration):</label>
+                <label for="hardware-id">My Hardware ID:</label>
                 <input type="text" id="hardware-id" value="web-client-hardware-001">
             </div>
             <div>
@@ -37,7 +36,7 @@
                 <input type="text" id="device-id" readonly>
             </div>
              <div>
-                <label for="target-id">Target Device ID (0 for broadcast/self):</label>
+                <label for="target-id">Target Device ID (for msg_send):</label>
                 <input type="text" id="target-id" value="0">
             </div>
             <hr>
@@ -48,16 +47,19 @@
             <button id="send-msg-btn" disabled>Send Generic Msg</button>
             <hr>
             <div>
-                <label for="var-update-content">Variables to Update (JSON for 'variables' key):</label>
-                <textarea id="var-update-content" rows="3">{ "temperature": 25.5, "status": "online" }</textarea>
+                <label for="var-update-content">Variables to Update (JSON object):</label>
+                <textarea id="var-update-content" rows="4">{
+  "status": "online",
+  "(hub-001).load": 0.75
+}</textarea>
             </div>
             <button id="var-update-btn" disabled>Update Vars</button>
             <hr>
              <div>
-                <label for="var-get-keys">Variable Keys to Get (comma-separated):</label>
-                <input type="text" id="var-get-keys" value="temperature,status">
+                <label for="vars-query">Queries (e.g., (hub-001).Name, [10002].status, my_var):</label>
+                <input type="text" id="vars-query" value="(hub-001).Name,status">
             </div>
-            <button id="var-get-btn" disabled>Get Vars</button>
+            <button id="vars-query-btn" disabled>Query Variables</button>
 
         </div>
         <div id="log-container">
@@ -70,7 +72,7 @@
         const connectBtn = document.getElementById('connect-btn');
         const sendMsgBtn = document.getElementById('send-msg-btn');
         const varUpdateBtn = document.getElementById('var-update-btn');
-        const varGetBtn = document.getElementById('var-get-btn');
+        const varsQueryBtn = document.getElementById('vars-query-btn');
 
         const serverUrlInput = document.getElementById('server-url');
         const hardwareIdInput = document.getElementById('hardware-id');
@@ -78,7 +80,7 @@
         const targetIdInput = document.getElementById('target-id');
         const messageContentInput = document.getElementById('message-content');
         const varUpdateContentInput = document.getElementById('var-update-content');
-        const varGetKeysInput = document.getElementById('var-get-keys');
+        const varsQueryInput = document.getElementById('vars-query');
         const logsDiv = document.getElementById('logs');
 
         let ws;
@@ -86,7 +88,7 @@
         function setButtonsDisabled(disabled) {
             sendMsgBtn.disabled = disabled;
             varUpdateBtn.disabled = disabled;
-            varGetBtn.disabled = disabled;
+            varsQueryBtn.disabled = disabled;
         }
 
         function log(message, type = 'system') {
@@ -96,7 +98,7 @@
             logsDiv.prepend(entry);
         }
         
-        function sendMessage(type, payload) {
+        function sendMessage(type, payload, target = 0) {
              if (!ws) {
                 log('Not connected.', 'error');
                 return;
@@ -104,7 +106,7 @@
             try {
                 const message = {
                     id: crypto.randomUUID(),
-                    target: parseInt(targetIdInput.value, 10) || 0,
+                    target: target,
                     type: type,
                     payload: payload
                 };
@@ -153,8 +155,8 @@
                     deviceIdInput.value = newId;
                     log(`Registration successful! Stored Device ID: ${newId}. You can now send messages.`, 'system');
                     setButtonsDisabled(false);
-                } else if (msg.type === 'response' && msg.payload.success) {
-                    log('Authentication successful.', 'system');
+                } else if (msg.type === 'response' && msg.payload.original_id) {
+                    log(`Received response for request ${msg.payload.original_id}`, 'system');
                 }
             };
 
@@ -187,7 +189,7 @@
         sendMsgBtn.addEventListener('click', () => {
             try {
                 const payload = JSON.parse(messageContentInput.value);
-                sendMessage("msg_send", payload);
+                sendMessage("msg_send", payload, parseInt(targetIdInput.value, 10) || 0);
             } catch (e) {
                 log(`Invalid JSON in message content: ${e.message}`, 'error');
             }
@@ -203,13 +205,13 @@
             }
         });
 
-        varGetBtn.addEventListener('click', () => {
-            const keys = varGetKeysInput.value.split(',').map(k => k.trim()).filter(k => k);
-            if (keys.length > 0) {
-                const payload = { keys: keys };
-                sendMessage("var_get", payload);
+        varsQueryBtn.addEventListener('click', () => {
+            const queries = varsQueryInput.value.split(',').map(q => q.trim()).filter(q => q);
+            if (queries.length > 0) {
+                const payload = { queries: queries };
+                sendMessage("vars_query", payload);
             } else {
-                log('Please enter at least one key to get.', 'error');
+                log('Please enter at least one query.', 'error');
             }
         });
 
