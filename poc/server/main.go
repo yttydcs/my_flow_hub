@@ -8,10 +8,12 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -21,7 +23,7 @@ type HubMessage struct {
 	message []byte
 }
 
-// Server 结构体代表一个服务端实例，并作为客户端连接的中心枢纽
+// Server 结构体代表一个服务端实例
 type Server struct {
 	upgrader   websocket.Upgrader
 	parentAddr string
@@ -30,7 +32,8 @@ type Server struct {
 	deviceID   uint64
 	secretKey  string
 
-	clients    map[*Client]bool
+	clients    map[uint64]*Client
+	parentSend chan []byte
 	broadcast  chan *HubMessage
 	register   chan *Client
 	unregister chan *Client
@@ -45,10 +48,11 @@ func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
-		broadcast:  make(chan *HubMessage),
+		clients:    make(map[uint64]*Client),
+		parentSend: make(chan []byte, 256),
+		broadcast:  make(chan *HubMessage, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
 	}
 }
 
@@ -56,14 +60,15 @@ func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
 func (s *Server) run() {
 	for {
 		select {
-		case client := <-s.register:
-			s.clients[client] = true
-			log.Info().Int("total_clients", len(s.clients)).Msg("客户端已连接到 Hub")
+		case <-s.register:
+			log.Info().Msg("一个新客户端已连接，等待认证...")
 		case client := <-s.unregister:
-			if _, ok := s.clients[client]; ok {
-				delete(s.clients, client)
-				close(client.send)
-				log.Info().Uint64("clientID", client.deviceID).Int("total_clients", len(s.clients)).Msg("客户端已从 Hub 注销")
+			if client.deviceID != 0 {
+				if _, ok := s.clients[client.deviceID]; ok {
+					delete(s.clients, client.deviceID)
+					close(client.send)
+					log.Info().Uint64("clientID", client.deviceID).Int("total_clients", len(s.clients)).Msg("客户端已从 Hub 注销")
+				}
 			}
 		case hubMessage := <-s.broadcast:
 			s.routeMessage(hubMessage)
@@ -83,13 +88,15 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 
 	if msg.Type == "auth_request" {
 		if s.handleAuth(sourceClient, msg) {
-			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中认证成功")
+			s.clients[sourceClient.deviceID] = sourceClient
+			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中认证成功并注册")
 		}
 		return
 	}
 	if msg.Type == "register_request" {
 		if s.handleRegister(sourceClient, msg) {
-			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中注册成功")
+			s.clients[sourceClient.deviceID] = sourceClient
+			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中注册成功并注册")
 		}
 		return
 	}
@@ -98,39 +105,66 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 		log.Warn().Msg("匿名客户端尝试发送非认证/注册消息")
 		return
 	}
-
 	msg.Source = sourceClient.deviceID
 
-	if msg.Target == 0 { // Broadcast
-		for client := range s.clients {
-			if client.deviceID != sourceClient.deviceID {
+	switch msg.Type {
+	case "var_update":
+		s.handleVarUpdate(sourceClient, msg)
+	case "var_get":
+		s.handleVarGet(sourceClient, msg)
+	case "msg_send":
+		s.routeGenericMessage(sourceClient, msg)
+	default:
+		log.Warn().Str("type", msg.Type).Msg("收到未知的消息类型")
+	}
+}
+
+// routeGenericMessage 处理通用的点对点或广播消息
+func (s *Server) routeGenericMessage(sourceClient *Client, msg protocol.BaseMessage) {
+	messageBytes := mustMarshal(msg)
+
+	if client, ok := s.clients[msg.Target]; ok {
+		select {
+		case client.send <- messageBytes:
+		default:
+			log.Warn().Uint64("clientID", msg.Target).Msg("客户端发送缓冲区已满，消息被丢弃")
+		}
+		return
+	}
+
+	if msg.Target == s.deviceID {
+		log.Info().Interface("msg", msg).Msg("消息被本地处理")
+		return
+	}
+
+	if msg.Target == 0 {
+		log.Info().Msg("正在处理广播消息...")
+		for id, client := range s.clients {
+			if id != sourceClient.deviceID {
 				select {
-				case client.send <- hubMessage.message:
+				case client.send <- messageBytes:
 				default:
-					close(client.send)
-					delete(s.clients, client)
+					log.Warn().Uint64("clientID", id).Msg("客户端发送缓冲区已满，消息被丢弃")
 				}
 			}
 		}
-	} else { // Point-to-point
-		for client := range s.clients {
-			if client.deviceID == msg.Target {
-				select {
-				case client.send <- hubMessage.message:
-				default:
-					close(client.send)
-					delete(s.clients, client)
-				}
-				return
-			}
+		if s.parentAddr != "" {
+			s.parentSend <- messageBytes
 		}
-		log.Warn().Uint64("targetID", msg.Target).Msg("点对点消息目标未找到")
+		return
+	}
+
+	if s.parentAddr != "" {
+		log.Info().Uint64("target", msg.Target).Msg("目标不在本地，向上级转发")
+		s.parentSend <- messageBytes
+	} else {
+		log.Warn().Uint64("target", msg.Target).Msg("目标未找到，且无上级可转发")
 	}
 }
 
 // Start 启动服务
 func (s *Server) Start() {
-	s.bootstrap() // Ensure the server has a DB record for itself
+	s.bootstrap()
 	go s.run()
 
 	if s.parentAddr != "" {
@@ -144,7 +178,6 @@ func (s *Server) Start() {
 	}
 }
 
-// handleAuth and handleRegister are now part of the hub logic
 func (s *Server) handleAuth(client *Client, msg protocol.BaseMessage) bool {
 	var payload protocol.AuthRequestPayload
 	jsonPayload, _ := json.Marshal(msg.Payload)
@@ -197,6 +230,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 	client.deviceID = newDevice.DeviceUID
 
 	response := protocol.BaseMessage{
+		ID:   msg.ID,
 		Type: "register_response",
 		Payload: map[string]interface{}{
 			"success":   true,
@@ -204,10 +238,94 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 			"secretKey": "default-secret",
 		},
 	}
-	responseBytes, _ := json.Marshal(response)
-	client.send <- responseBytes
-
+	client.send <- mustMarshal(response)
 	return true
+}
+
+func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
+	payload, ok := msg.Payload.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	variables, ok := payload["variables"].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	targetDeviceID := msg.Target
+	if targetDeviceID == 0 {
+		targetDeviceID = client.deviceID
+	}
+
+	for key, value := range variables {
+		jsonValue, _ := json.Marshal(value)
+		variable := DeviceVariable{
+			OwnerDeviceID: targetDeviceID,
+			VariableName:  key,
+			Value:         datatypes.JSON(jsonValue),
+		}
+		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDeviceID, key).Assign(DeviceVariable{Value: datatypes.JSON(jsonValue)}).FirstOrCreate(&variable).Error; err != nil {
+			log.Error().Err(err).Msg("更新变量失败")
+		}
+	}
+	log.Info().Uint64("targetDeviceID", targetDeviceID).Msg("变量已更新")
+}
+
+func (s *Server) handleVarGet(client *Client, msg protocol.BaseMessage) {
+	payload, ok := msg.Payload.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	keys, ok := payload["keys"].([]interface{})
+	if !ok {
+		return
+	}
+
+	targetDeviceID := msg.Target
+	if targetDeviceID == 0 {
+		targetDeviceID = client.deviceID
+	}
+
+	results := make(map[string]interface{})
+	for _, key_i := range keys {
+		key, ok := key_i.(string)
+		if !ok {
+			continue
+		}
+
+		var variable DeviceVariable
+		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDeviceID, key).First(&variable).Error; err == nil {
+			var val interface{}
+			json.Unmarshal(variable.Value, &val)
+			results[key] = val
+		}
+	}
+
+	response := protocol.BaseMessage{
+		ID:        uuid.New().String(),
+		Source:    s.deviceID,
+		Target:    client.deviceID,
+		Type:      "response",
+		Timestamp: time.Now(),
+		Payload: map[string]interface{}{
+			"success":     true,
+			"original_id": msg.ID,
+			"data": map[string]interface{}{
+				"variables": results,
+			},
+		},
+	}
+	client.send <- mustMarshal(response)
+}
+
+func mustMarshal(msg protocol.BaseMessage) []byte {
+	bytes, err := json.Marshal(msg)
+	if err != nil {
+		panic(err)
+	}
+	return bytes
 }
 
 func main() {

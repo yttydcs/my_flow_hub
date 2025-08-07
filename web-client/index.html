@@ -7,14 +7,15 @@
     <style>
         body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; }
         #main { display: flex; flex: 1; }
-        #controls { padding: 1rem; border-right: 1px solid #ccc; display: flex; flex-direction: column; gap: 1rem; }
+        #controls { padding: 1rem; border-right: 1px solid #ccc; display: flex; flex-direction: column; gap: 1rem; min-width: 350px; }
         #log-container { flex: 1; padding: 1rem; overflow-y: auto; }
-        .log-entry { border-bottom: 1px solid #eee; padding: 0.5rem 0; font-family: monospace; white-space: pre-wrap; }
+        .log-entry { border-bottom: 1px solid #eee; padding: 0.5rem 0; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
         .log-entry.sent { color: blue; }
         .log-entry.received { color: green; }
         .log-entry.error { color: red; }
         .log-entry.system { color: purple; }
-        input, button { padding: 0.5rem; }
+        input, button, textarea { padding: 0.5rem; width: 100%; box-sizing: border-box; }
+        .button-group { display: flex; gap: 0.5rem; }
     </style>
 </head>
 <body>
@@ -36,14 +37,28 @@
                 <input type="text" id="device-id" readonly>
             </div>
              <div>
-                <label for="target-id">Target Device ID (0 for broadcast):</label>
+                <label for="target-id">Target Device ID (0 for broadcast/self):</label>
                 <input type="text" id="target-id" value="0">
             </div>
+            <hr>
             <div>
-                <label for="message-content">Message (JSON):</label>
-                <textarea id="message-content" rows="4">{ "command": "ping" }</textarea>
+                <label for="message-content">Generic Message Payload (JSON):</label>
+                <textarea id="message-content" rows="3">{ "command": "ping" }</textarea>
             </div>
-            <button id="send-btn" disabled>Send Message</button>
+            <button id="send-msg-btn" disabled>Send Generic Msg</button>
+            <hr>
+            <div>
+                <label for="var-update-content">Variables to Update (JSON for 'variables' key):</label>
+                <textarea id="var-update-content" rows="3">{ "temperature": 25.5, "status": "online" }</textarea>
+            </div>
+            <button id="var-update-btn" disabled>Update Vars</button>
+            <hr>
+             <div>
+                <label for="var-get-keys">Variable Keys to Get (comma-separated):</label>
+                <input type="text" id="var-get-keys" value="temperature,status">
+            </div>
+            <button id="var-get-btn" disabled>Get Vars</button>
+
         </div>
         <div id="log-container">
             <h2>Log</h2>
@@ -53,21 +68,51 @@
 
     <script>
         const connectBtn = document.getElementById('connect-btn');
-        const sendBtn = document.getElementById('send-btn');
+        const sendMsgBtn = document.getElementById('send-msg-btn');
+        const varUpdateBtn = document.getElementById('var-update-btn');
+        const varGetBtn = document.getElementById('var-get-btn');
+
         const serverUrlInput = document.getElementById('server-url');
         const hardwareIdInput = document.getElementById('hardware-id');
         const deviceIdInput = document.getElementById('device-id');
         const targetIdInput = document.getElementById('target-id');
         const messageContentInput = document.getElementById('message-content');
+        const varUpdateContentInput = document.getElementById('var-update-content');
+        const varGetKeysInput = document.getElementById('var-get-keys');
         const logsDiv = document.getElementById('logs');
 
         let ws;
+
+        function setButtonsDisabled(disabled) {
+            sendMsgBtn.disabled = disabled;
+            varUpdateBtn.disabled = disabled;
+            varGetBtn.disabled = disabled;
+        }
 
         function log(message, type = 'system') {
             const entry = document.createElement('div');
             entry.className = `log-entry ${type}`;
             entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
             logsDiv.prepend(entry);
+        }
+        
+        function sendMessage(type, payload) {
+             if (!ws) {
+                log('Not connected.', 'error');
+                return;
+            }
+            try {
+                const message = {
+                    id: crypto.randomUUID(),
+                    target: parseInt(targetIdInput.value, 10) || 0,
+                    type: type,
+                    payload: payload
+                };
+                ws.send(JSON.stringify(message));
+                log(`Sent: ${JSON.stringify(message, null, 2)}`, 'sent');
+            } catch (e) {
+                log(`Error sending message: ${e.message}`, 'error');
+            }
         }
 
         function connect() {
@@ -78,25 +123,19 @@
                 log('Connected to server.', 'system');
                 connectBtn.textContent = 'Disconnect';
 
-                const storedId = localStorage.getItem('deviceId');
-                const storedSecret = localStorage.getItem('secretKey');
+                const storedId = localStorage.getItem(hardwareIdInput.value + '_deviceId');
+                const storedSecret = localStorage.getItem(hardwareIdInput.value + '_secretKey');
 
                 if (storedId && storedSecret) {
-                    // Authenticate with stored credentials
                     log(`Found stored credentials. Authenticating as Device ID: ${storedId}`, 'system');
                     const authPayload = { deviceId: parseInt(storedId, 10), secretKey: storedSecret };
-                    const authMsg = { id: crypto.randomUUID(), target: 0, type: "auth_request", payload: authPayload };
-                    ws.send(JSON.stringify(authMsg));
-                    log(`Sent Auth: ${JSON.stringify(authMsg, null, 2)}`, 'sent');
+                    sendMessage("auth_request", authPayload);
                     deviceIdInput.value = storedId;
-                    sendBtn.disabled = false;
+                    setButtonsDisabled(false);
                 } else {
-                    // Register as a new device
                     log('No stored credentials. Registering as a new device...', 'system');
                     const regPayload = { hardwareId: hardwareIdInput.value };
-                    const regMsg = { id: crypto.randomUUID(), type: "register_request", payload: regPayload };
-                    ws.send(JSON.stringify(regMsg));
-                    log(`Sent Register Request: ${JSON.stringify(regMsg, null, 2)}`, 'sent');
+                    sendMessage("register_request", regPayload);
                 }
             };
 
@@ -104,31 +143,29 @@
                 const msg = JSON.parse(event.data);
                 log(`Received: ${JSON.stringify(msg, null, 2)}`, 'received');
 
-                // If this is a registration response, store the new ID and secret
                 if (msg.type === 'register_response' && msg.payload.success) {
                     const newId = msg.payload.deviceId;
                     const newSecret = msg.payload.secretKey;
                     
-                    localStorage.setItem('deviceId', newId);
-                    localStorage.setItem('secretKey', newSecret);
+                    localStorage.setItem(hardwareIdInput.value + '_deviceId', newId);
+                    localStorage.setItem(hardwareIdInput.value + '_secretKey', newSecret);
 
                     deviceIdInput.value = newId;
                     log(`Registration successful! Stored Device ID: ${newId}. You can now send messages.`, 'system');
-                    sendBtn.disabled = false;
+                    setButtonsDisabled(false);
                 } else if (msg.type === 'response' && msg.payload.success) {
-                    // Generic successful response, likely to our auth request
                     log('Authentication successful.', 'system');
                 }
             };
 
             ws.onerror = (error) => {
-                log(`WebSocket Error: ${error}`, 'error');
+                log(`WebSocket Error: ${JSON.stringify(error)}`, 'error');
             };
 
             ws.onclose = () => {
                 log('Disconnected from server.', 'system');
                 connectBtn.textContent = 'Connect';
-                sendBtn.disabled = true;
+                setButtonsDisabled(true);
                 ws = null;
             };
         }
@@ -147,25 +184,35 @@
             }
         });
 
-        sendBtn.addEventListener('click', () => {
-            if (!ws) {
-                log('Not connected.', 'error');
-                return;
-            }
+        sendMsgBtn.addEventListener('click', () => {
             try {
                 const payload = JSON.parse(messageContentInput.value);
-                const message = {
-                    id: crypto.randomUUID(),
-                    target: parseInt(targetIdInput.value, 10) || 0, // Ensure target is a number, default to 0
-                    type: "msg_send",
-                    payload: payload
-                };
-                ws.send(JSON.stringify(message));
-                log(`Sent: ${JSON.stringify(message, null, 2)}`, 'sent');
+                sendMessage("msg_send", payload);
             } catch (e) {
                 log(`Invalid JSON in message content: ${e.message}`, 'error');
             }
         });
+
+        varUpdateBtn.addEventListener('click', () => {
+            try {
+                const variables = JSON.parse(varUpdateContentInput.value);
+                const payload = { variables: variables };
+                sendMessage("var_update", payload);
+            } catch (e) {
+                log(`Invalid JSON in variables content: ${e.message}`, 'error');
+            }
+        });
+
+        varGetBtn.addEventListener('click', () => {
+            const keys = varGetKeysInput.value.split(',').map(k => k.trim()).filter(k => k);
+            if (keys.length > 0) {
+                const payload = { keys: keys };
+                sendMessage("var_get", payload);
+            } else {
+                log('Please enter at least one key to get.', 'error');
+            }
+        });
+
     </script>
 </body>
 </html>

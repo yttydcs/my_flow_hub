@@ -16,11 +16,6 @@ const (
 	maxMessageSize = 512
 )
 
-var (
-	newline = []byte{'\n'}
-	space   = []byte{' '}
-)
-
 // Client is a middleman between the websocket connection and the hub.
 type Client struct {
 	hub      *Server
@@ -42,11 +37,11 @@ func (c *Client) readPump() {
 		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Printf("error: %v", err)
+				log.Error().Err(err).Msg("Unexpected websocket close")
 			}
 			break
 		}
-		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
+		message = bytes.TrimSpace(message)
 		hubMsg := &HubMessage{client: c, message: message}
 		c.hub.broadcast <- hubMsg
 	}
@@ -64,23 +59,11 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
+				// The hub closed the channel.
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-
-			w, err := c.conn.NextWriter(websocket.TextMessage)
-			if err != nil {
-				return
-			}
-			w.Write(message)
-
-			n := len(c.send)
-			for i := 0; i < n; i++ {
-				w.Write(newline)
-				w.Write(<-c.send)
-			}
-
-			if err := w.Close(); err != nil {
+			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
 				return
 			}
 		case <-ticker.C:
@@ -99,8 +82,8 @@ func (s *Server) handleSubordinateConnection(w http.ResponseWriter, r *http.Requ
 		log.Error().Err(err).Msg("Failed to upgrade connection")
 		return
 	}
-	client := &Client{hub: s, conn: conn, send: make(chan []byte, 256), deviceID: 0} // Start as anonymous
-	client.hub.register <- client
+	client := &Client{hub: s, conn: conn, send: make(chan []byte, 256), deviceID: 0}
+	s.register <- client
 
 	go client.writePump()
 	go client.readPump()
