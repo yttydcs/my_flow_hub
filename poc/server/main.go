@@ -95,6 +95,7 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 		if s.handleAuth(sourceClient, msg) {
 			s.clients[sourceClient.deviceID] = sourceClient
 			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中认证成功并注册")
+			go s.syncVarsOnLogin(sourceClient) // 上线后同步变量
 		}
 		return
 	}
@@ -226,7 +227,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 		HardwareID:    payload.HardwareID,
 		SecretKeyHash: string(hashedSecret),
 		Role:          RoleNode,
-		Name:          payload.HardwareID, // Use hardware ID as name by default
+		Name:          payload.HardwareID,
 	}
 
 	if err := DB.Create(&newDevice).Error; err != nil {
@@ -259,17 +260,15 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 		return
 	}
 
-	var updatedCount int
-	for fqdn, value := range variables { // fqdn: Fully Qualified Domain Name, e.g., "(hub-001).status"
-		var deviceIdentifier, varName string
-		hasDot := strings.Contains(fqdn, ".")
+	updatedVarsByDevice := make(map[uint64]map[string]interface{})
 
-		if hasDot {
+	for fqdn, value := range variables {
+		var deviceIdentifier, varName string
+		if strings.Contains(fqdn, ".") {
 			parts := strings.SplitN(fqdn, ".", 2)
 			deviceIdentifier = parts[0]
 			varName = parts[1]
 		} else {
-			// Default to self
 			deviceIdentifier = fmt.Sprintf("[%d]", client.deviceID)
 			varName = fqdn
 		}
@@ -281,24 +280,14 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 
 		var targetDevice Device
 		var err error
-
 		if strings.HasPrefix(deviceIdentifier, "[") && strings.HasSuffix(deviceIdentifier, "]") {
-			deviceIDStr := strings.Trim(deviceIdentifier, "[]")
-			err = DB.Where("device_uid = ?", deviceIDStr).First(&targetDevice).Error
-		} else if strings.HasPrefix(deviceIdentifier, "(") && strings.HasSuffix(deviceIdentifier, ")") {
-			deviceName := strings.Trim(deviceIdentifier, "()")
-			err = DB.Where("name = ?", deviceName).First(&targetDevice).Error
+			err = DB.Where("device_uid = ?", strings.Trim(deviceIdentifier, "[]")).First(&targetDevice).Error
 		} else {
-			log.Warn().Str("identifier", deviceIdentifier).Msg("更新失败：无效的设备标识符格式")
-			continue
+			err = DB.Where("name = ?", strings.Trim(deviceIdentifier, "()")).First(&targetDevice).Error
 		}
-
 		if err != nil {
-			log.Warn().Str("identifier", deviceIdentifier).Msg("更新失败：设备不存在")
 			continue
 		}
-
-		// TODO: Check permissions here
 
 		jsonValue, _ := json.Marshal(value)
 		variable := DeviceVariable{
@@ -306,13 +295,18 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 			VariableName:  varName,
 			Value:         datatypes.JSON(jsonValue),
 		}
-		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDevice.ID, varName).Assign(DeviceVariable{Value: datatypes.JSON(jsonValue)}).FirstOrCreate(&variable).Error; err != nil {
-			log.Error().Err(err).Msg("更新变量失败")
-		} else {
-			updatedCount++
+		if DB.Where("owner_device_id = ? AND variable_name = ?", targetDevice.ID, varName).Assign(DeviceVariable{Value: datatypes.JSON(jsonValue)}).FirstOrCreate(&variable).Error == nil {
+			if _, ok := updatedVarsByDevice[targetDevice.DeviceUID]; !ok {
+				updatedVarsByDevice[targetDevice.DeviceUID] = make(map[string]interface{})
+			}
+			updatedVarsByDevice[targetDevice.DeviceUID][varName] = value
 		}
 	}
-	log.Info().Int("count", updatedCount).Msg("变量已更新")
+
+	// 发送下行通知
+	for deviceID, vars := range updatedVarsByDevice {
+		s.notifyVarChange(deviceID, msg.Source, vars)
+	}
 }
 
 func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
@@ -320,48 +314,34 @@ func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
 	jsonPayload, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(jsonPayload, &payload)
 
-	// 使用 slice 来保证返回顺序
 	results := make([]interface{}, len(payload.Queries))
 
 	for i, query := range payload.Queries {
 		var deviceIdentifier, varName string
-		hasDot := strings.Contains(query, ".")
-
-		if hasDot {
+		if strings.Contains(query, ".") {
 			parts := strings.SplitN(query, ".", 2)
 			deviceIdentifier = parts[0]
 			varName = parts[1]
 		} else {
-			// 不包含'.', 默认查询自身
 			deviceIdentifier = fmt.Sprintf("[%d]", client.deviceID)
 			varName = query
 		}
 
 		var targetDevice Device
 		var err error
-
 		if strings.HasPrefix(deviceIdentifier, "[") && strings.HasSuffix(deviceIdentifier, "]") {
-			deviceIDStr := strings.Trim(deviceIdentifier, "[]")
-			err = DB.Where("device_uid = ?", deviceIDStr).First(&targetDevice).Error
-		} else if strings.HasPrefix(deviceIdentifier, "(") && strings.HasSuffix(deviceIdentifier, ")") {
-			deviceName := strings.Trim(deviceIdentifier, "()")
-			err = DB.Where("name = ?", deviceName).First(&targetDevice).Error
+			err = DB.Where("device_uid = ?", strings.Trim(deviceIdentifier, "[]")).First(&targetDevice).Error
 		} else {
-			// 如果格式不匹配，则此查询无效
-			log.Warn().Str("query", query).Msg("无效的查询格式")
-			results[i] = nil // 填充 nil 以保持顺序
-			continue
+			err = DB.Where("name = ?", strings.Trim(deviceIdentifier, "()")).First(&targetDevice).Error
 		}
-
 		if err != nil {
-			log.Warn().Str("identifier", deviceIdentifier).Msg("查询失败：设备不存在")
 			results[i] = nil
 			continue
 		}
 
 		var variable DeviceVariable
 		if err := DB.Where("owner_device_id = ? AND variable_name = ?", targetDevice.ID, varName).First(&variable).Error; err != nil {
-			results[i] = nil // 未找到变量
+			results[i] = nil
 		} else {
 			var val interface{}
 			json.Unmarshal(variable.Value, &val)
@@ -379,11 +359,46 @@ func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
 			"success":     true,
 			"original_id": msg.ID,
 			"data": map[string]interface{}{
-				"results": results, // 返回有序的 slice
+				"results": results,
 			},
 		},
 	}
 	client.send <- mustMarshal(response)
+}
+
+func (s *Server) syncVarsOnLogin(client *Client) {
+	var variables []DeviceVariable
+	DB.Where("owner_device_id = ?", client.deviceID).Find(&variables)
+
+	if len(variables) == 0 {
+		return
+	}
+
+	varsMap := make(map[string]interface{})
+	for _, v := range variables {
+		var val interface{}
+		json.Unmarshal(v.Value, &val)
+		varsMap[v.VariableName] = val
+	}
+
+	s.notifyVarChange(client.deviceID, s.deviceID, varsMap)
+	log.Info().Uint64("clientID", client.deviceID).Msg("已完成上线变量同步")
+}
+
+func (s *Server) notifyVarChange(targetDeviceID, sourceDeviceID uint64, variables map[string]interface{}) {
+	if targetClient, ok := s.clients[targetDeviceID]; ok {
+		notification := protocol.BaseMessage{
+			ID:        uuid.New().String(),
+			Source:    sourceDeviceID,
+			Target:    targetDeviceID,
+			Type:      "var_notify",
+			Timestamp: time.Now(),
+			Payload: map[string]interface{}{
+				"variables": variables,
+			},
+		}
+		targetClient.send <- mustMarshal(notification)
+	}
 }
 
 func mustMarshal(msg protocol.BaseMessage) []byte {
@@ -399,7 +414,7 @@ func main() {
 
 	dbHost := "localhost"
 	dbUser := "postgres"
-	dbPassword := "123456"
+	dbPassword := "your_postgres_password"
 	dbName := "myflowhub"
 	dbPort := "5432"
 

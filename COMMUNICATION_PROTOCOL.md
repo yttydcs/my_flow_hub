@@ -162,7 +162,21 @@
 
 服务器和客户端之间的响应和通知将使用统一的 `response` 和 `notify` 类型。
 
-1.  **通用响应: `response`**
+1.  **变量变更通知: `var_notify`**
+    当一个设备的变量被修改，或一个设备上线需要同步其全部状态时，服务器会向该设备推送此消息。
+
+    **Payload 结构:**
+    ```json
+    {
+      "source": "device-id-or-server", // 变更来源
+      "variables": { // 包含一个或多个变更的变量
+        "temperature": 25.5,
+        "status": "running"
+      }
+    }
+    ```
+
+2.  **通用响应: `response`**
     服务器对客户端请求的通用响应。
 
     **Payload 结构:**
@@ -176,20 +190,6 @@
       }
     }
     ```
-
-2.  **通用通知: `notify`**
-    服务器主动向客户端推送的通知，例如变量被他人修改。
-
-    **Payload 结构:**
-    ```json
-    {
-      "event": "var_changed", // 事件类型
-      "data": {
-        "variables": { "led_on": true }
-      }
-    }
-    ```
-    - **路由**: `source` 字段为事件触发者，`target` 字段为接收通知的设备。
 
 ## 4. 错误处理
 
