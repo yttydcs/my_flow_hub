@@ -36,25 +36,69 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | 权限管理 | ❌ 未实现 | 当前默认允许所有操作。 |
 | 二进制协议支持 | ❌ 未实现 | 当前使用JSON，未来可优化。 |
 
+## 项目结构
+
+### `server/` - Go 后端服务
+
+这是项目核心的 Go 服务端应用。
+
+-   **`cmd/myflowhub/main.go`**: 项目的主入口。它负责加载配置、初始化数据库、并根据配置启动中枢和/或中继服务。
+-   **`internal/`**: 存放所有不对外暴露的内部包，这是 Go 项目的标准实践。
+    -   **`config/`**:
+        -   `config.go`: 定义了 `Config` 结构体，并提供了 `LoadConfig` 函数来从 `config.json` 加载配置。
+        -   `config.json`: 默认的配置文件。
+    -   **`database/`**:
+        -   `database.go`: 负责初始化到 PostgreSQL 的连接，并使用 GORM 自动迁移数据库模式。
+        -   `models.go`: 定义了与数据库表对应的 GORM 模型（如 `Device`, `DeviceVariable`）。
+    -   **`hub/`**: 实现了 WebSocket 的核心逻辑。
+        -   `hub.go`: 定义了 `Server` 结构体（即 Hub），并包含了其主运行循环 `Run()` 和核心的消息路由逻辑 `routeMessage()`。
+        -   `handlers.go`: 定义了 `Client` 结构体和处理新 WebSocket 连接的 HTTP handler。
+        -   `bootstrap.go`: 实现了服务器的自举逻辑，确保每个服务器实例在数据库中都有自己的持久化身份。
+        -   `parent_connector.go`: 实现了作为中继时，连接和维护与上级服务器关系的所有逻辑。
+-   **`pkg/`**: 存放可以在项目外部共享的包。
+    -   **`protocol/`**:
+        -   `types.go`: 定义了客户端和服务端之间通信所使用的所有消息结构体（如 `BaseMessage`, `AuthRequestPayload`）。
+-   **`go.mod`, `go.sum`**: Go 模块文件，管理项目依赖。
+
+### `web/` - Vue 3 前端管理界面
+
+这是使用 Vue 3 + Vite + Naive UI 构建的现代化后台管理界面。
+
+-   **`src/`**: 前端源代码。
+    -   `App.vue`: 根组件，集成了 Naive UI 的全局提供者。
+    -   `main.ts`: 前端应用入口。
+    -   `router/`: Vue Router 的配置。
+    -   `views/`: 存放页面的视图组件，例如 `DashboardView.vue`。
+-   **`index.html`**: 单页面应用的 HTML 入口。
+-   **`package.json`**: Node.js 项目文件，管理前端依赖和脚本。
+-   **`vite.config.ts`**: Vite 构建工具的配置文件。
+
+### `web-client/` - 简单调试客户端
+
+一个独立的、无依赖的 `index.html` 文件，用于快速、轻量地测试和调试 WebSocket 服务端的核心功能。
+
 ## 如何运行
 
-1.  **准备环境**:
-    *   确保您的系统中已安装 Go 和 PostgreSQL。
-    *   在 `poc/server/main.go` 中，将 `dbPassword` 的值修改为您本地 PostgreSQL 的真实密码。
-2.  **启动中枢**:
+1.  **配置后端**:
+    *   打开 `server/internal/config/config.json`。
+    *   在 `Database` 部分，将 `Password` 修改为您本地 PostgreSQL 的真实密码。
+    *   （可选）在 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
+2.  **启动后端服务**:
     ```bash
-    cd poc/server
-    go run .
+    cd server
+    go run ./cmd/myflowhub
     ```
-3.  **（可选）启动中继**:
+    服务器将启动，并托管前端静态文件。
+3.  **开发前端**:
     *   打开一个新的终端。
     ```bash
-    cd poc/server
-    go run . relay
+    cd web
+    npm install
+    npm run dev
     ```
-4.  **打开调试客户端**:
-    *   在您的文件浏览器中，找到 `web-client/index.html` 并用浏览器打开。
-    *   您可以打开多个客户端窗口来模拟多个设备。
+    这会启动一个带热重载的前端开发服务器。
+4.  **访问管理后台**:
+    *   在浏览器中打开 `http://localhost:5173` (Vite 开发服务器的默认地址) 或后端服务地址（如 `http://localhost:8080`）。
 
 ## 下一步计划
 
