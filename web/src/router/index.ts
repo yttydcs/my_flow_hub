@@ -1,14 +1,52 @@
 import { createRouter, createWebHistory } from 'vue-router'
-
-import DashboardView from '../views/DashboardView.vue'
+import HomeView from '@/views/HomeView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     {
       path: '/',
-      name: 'dashboard',
-      component: DashboardView
+      name: 'home',
+      component: HomeView,
+      children: [
+        {
+          path: '',
+          name: 'dashboard',
+          component: () => import('@/views/DashboardView.vue')
+        },
+        {
+          path: 'manage',
+          name: 'manage',
+          component: () => import('@/views/ManageView.vue'),
+          children: [
+            {
+              path: 'devices',
+              name: 'manage-devices',
+              component: () => import('@/views/manage/DevicesView.vue')
+            },
+            {
+              path: 'variables',
+              name: 'manage-variables', 
+              component: () => import('@/views/manage/VariablesView.vue')
+            },
+            {
+              path: 'users',
+              name: 'manage-users',
+              component: () => import('@/views/manage/UsersView.vue')
+            },
+            {
+              path: 'logs',
+              name: 'manage-logs',
+              component: () => import('@/views/manage/LogsView.vue')
+            }
+          ]
+        },
+        {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/SettingsView.vue')
+        }
+      ]
     }
   ]
 })

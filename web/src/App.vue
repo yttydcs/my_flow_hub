@@ -13,3 +13,17 @@ import { NMessageProvider, NDialogProvider, NConfigProvider, NGlobalStyle } from
     <n-global-style />
   </n-config-provider>
 </template>
+
+<style>
+html, body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background-color: #f5f5f5;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+#app {
+  height: 100vh;
+}
+</style>

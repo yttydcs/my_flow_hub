@@ -1,38 +1,42 @@
 <template>
-  <n-layout style="height: 100vh">
-    <!-- 头部导航 -->
-    <n-layout-header 
-      style="height: 64px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between;" 
-      bordered
-    >
-      <div style="display: flex; align-items: center; gap: 16px;">
-        <n-icon size="32" color="#18a058"><ServerIcon /></n-icon>
-        <div>
-          <div style="font-size: 1.5rem; font-weight: bold;">MyFlowHub</div>
-          <div style="font-size: 0.8rem; color: #999;">设备管理中心</div>
-        </div>
-      </div>
+  <div style="height: calc(100vh - 60px); overflow: hidden;">
+    <!-- 状态卡片 -->
+    <n-space style="padding: 24px; padding-bottom: 16px;" size="large">
+      <n-card style="min-width: 200px;">
+        <n-statistic label="连接状态" tabular-nums>
+          <n-tag :type="connectionStatus.type" size="large">
+            <template #icon>
+              <n-icon><component :is="connectionStatus.icon" /></n-icon>
+            </template>
+            {{ connectionStatus.text }}
+          </n-tag>
+        </n-statistic>
+      </n-card>
       
-      <n-space>
-        <n-tag :type="connectionStatus.type" size="large">
-          <template #icon>
-            <n-icon><component :is="connectionStatus.icon" /></n-icon>
-          </template>
-          {{ connectionStatus.text }}
-        </n-tag>
+      <n-card style="min-width: 150px;">
         <n-statistic label="设备数量" :value="deviceCount" />
+      </n-card>
+      
+      <n-card style="min-width: 150px;">
         <n-statistic label="变量数量" :value="variables.length" />
-        <n-button @click="handleRefreshAll" :loading="loading" type="primary">
-          <template #icon>
-            <n-icon><RefreshIcon /></n-icon>
-          </template>
-          刷新全部
-        </n-button>
-      </n-space>
-    </n-layout-header>
+      </n-card>
+      
+      <n-card style="min-width: 200px;">
+        <n-statistic label="最后更新">
+          {{ lastUpdated ? lastUpdated.toLocaleString() : '未更新' }}
+        </n-statistic>
+      </n-card>
+      
+      <n-button @click="handleRefreshAll" :loading="loading" type="primary" size="large">
+        <template #icon>
+          <n-icon><RefreshIcon /></n-icon>
+        </template>
+        刷新全部
+      </n-button>
+    </n-space>
 
     <!-- 主体布局 -->
-    <n-layout has-sider>
+    <n-layout has-sider style="height: calc(100% - 120px); padding: 0 24px 24px;">
       <!-- 左侧设备树 -->
       <n-layout-sider
         bordered
@@ -82,15 +86,15 @@
 
     <!-- 加载指示器 -->
     <n-back-top :right="40" />
-  </n-layout>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { 
-  NLayout, NLayoutHeader, NLayoutSider, NLayoutContent, 
+  NLayout, NLayoutSider, NLayoutContent, 
   NSpace, NButton, NIcon, NTag, NStatistic, NAlert, 
-  NMessageProvider, NBackTop
+  NMessageProvider, NBackTop, NCard
 } from 'naive-ui'
 import { 
   Server as ServerIcon, 
@@ -229,11 +233,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.n-layout-header {
-  background-color: white;
-  border-bottom: 1px solid #e0e0e0;
-}
-
 .n-layout-sider {
   background-color: #fafafa;
 }
