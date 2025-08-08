@@ -26,17 +26,19 @@ func main() {
 
 	database.InitDatabase(dsn, postgresDsn, dbConf.DBName)
 
-	// 启动中枢
-	serverConf := config.AppConfig.Server
-	hubSrv := hub.NewServer("", serverConf.ListenAddr, serverConf.HardwareID)
-	go hubSrv.Start()
+	var server *hub.Server
 
-	// 根据配置决定是否启动中继
 	if config.AppConfig.Relay.Enabled {
+		// 作为中继启动
 		relayConf := config.AppConfig.Relay
-		relay := hub.NewServer(relayConf.ParentAddr, relayConf.ListenAddr, relayConf.HardwareID)
-		go relay.Start()
+		log.Info().Msg("以中继模式启动...")
+		server = hub.NewServer(relayConf.ParentAddr, relayConf.ListenAddr, relayConf.HardwareID)
+	} else {
+		// 作为中枢启动
+		serverConf := config.AppConfig.Server
+		log.Info().Msg("以中枢模式启动...")
+		server = hub.NewServer("", serverConf.ListenAddr, serverConf.HardwareID)
 	}
 
-	select {}
+	server.Start() // 阻塞式启动
 }
