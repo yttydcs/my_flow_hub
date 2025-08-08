@@ -1,0 +1,19 @@
+{
+  "Database": {
+    "Host": "localhost",
+    "User": "postgres",
+    "Password": "123456",
+    "DBName": "myflowhub",
+    "Port": "5432"
+  },
+  "Server": {
+    "ListenAddr": ":8080",
+    "HardwareID": "hub-001"
+  },
+  "Relay": {
+    "Enabled": false,
+    "ParentAddr": "ws://localhost:8080/ws",
+    "ListenAddr": ":8081",
+    "HardwareID": "relay-001"
+  }
+}

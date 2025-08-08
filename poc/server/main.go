@@ -95,7 +95,7 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 		if s.handleAuth(sourceClient, msg) {
 			s.clients[sourceClient.deviceID] = sourceClient
 			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中认证成功并注册")
-			go s.syncVarsOnLogin(sourceClient) // 上线后同步变量
+			go s.syncVarsOnLogin(sourceClient)
 		}
 		return
 	}
@@ -260,8 +260,7 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 		return
 	}
 
-	updatedVarsByDevice := make(map[uint64]map[string]interface{})
-
+	var updatedCount int
 	for fqdn, value := range variables {
 		var deviceIdentifier, varName string
 		if strings.Contains(fqdn, ".") {
@@ -296,17 +295,10 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 			Value:         datatypes.JSON(jsonValue),
 		}
 		if DB.Where("owner_device_id = ? AND variable_name = ?", targetDevice.ID, varName).Assign(DeviceVariable{Value: datatypes.JSON(jsonValue)}).FirstOrCreate(&variable).Error == nil {
-			if _, ok := updatedVarsByDevice[targetDevice.DeviceUID]; !ok {
-				updatedVarsByDevice[targetDevice.DeviceUID] = make(map[string]interface{})
-			}
-			updatedVarsByDevice[targetDevice.DeviceUID][varName] = value
+			updatedCount++
 		}
 	}
-
-	// 发送下行通知
-	for deviceID, vars := range updatedVarsByDevice {
-		s.notifyVarChange(deviceID, msg.Source, vars)
-	}
+	log.Info().Int("count", updatedCount).Msg("变量已更新")
 }
 
 func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
@@ -412,25 +404,26 @@ func mustMarshal(msg protocol.BaseMessage) []byte {
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 
-	dbHost := "localhost"
-	dbUser := "postgres"
-	dbPassword := "your_postgres_password"
-	dbName := "myflowhub"
-	dbPort := "5432"
+	LoadConfig()
 
+	dbConf := AppConfig.Database
 	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		dbHost, dbUser, dbPassword, dbName, dbPort)
+		dbConf.Host, dbConf.User, dbConf.Password, dbConf.DBName, dbConf.Port)
 
 	postgresDsn := fmt.Sprintf("host=%s user=%s password=%s dbname=postgres port=%s sslmode=disable",
-		dbHost, dbUser, dbPassword, dbPort)
+		dbConf.Host, dbConf.User, dbConf.Password, dbConf.Port)
 
-	InitDatabase(dsn, postgresDsn, dbName)
+	InitDatabase(dsn, postgresDsn, dbConf.DBName)
 
-	hub := NewServer("", ":8080", "hub-001")
+	// 启动中枢
+	serverConf := AppConfig.Server
+	hub := NewServer("", serverConf.ListenAddr, serverConf.HardwareID)
 	go hub.Start()
 
-	if len(os.Args) > 1 && os.Args[1] == "relay" {
-		relay := NewServer("ws://localhost:8080/ws", ":8081", "relay-001")
+	// 根据配置决定是否启动中继
+	if AppConfig.Relay.Enabled {
+		relayConf := AppConfig.Relay
+		relay := NewServer(relayConf.ParentAddr, relayConf.ListenAddr, relayConf.HardwareID)
 		go relay.Start()
 	}
 
