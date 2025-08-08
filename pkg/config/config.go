@@ -21,6 +21,9 @@ type Config struct {
 		HardwareID   string `json:"HardwareID"`
 		ManagerToken string `json:"ManagerToken"`
 	} `json:"Server"`
+	Hub struct {
+		Address string `json:"Address"`
+	} `json:"Hub"`
 	Relay struct {
 		Enabled    bool   `json:"Enabled"`
 		ParentAddr string `json:"ParentAddr"`

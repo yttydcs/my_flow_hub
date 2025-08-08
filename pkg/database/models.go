@@ -28,7 +28,8 @@ type Device struct {
 	HardwareID    string     `gorm:"unique"`
 	Role          DeviceRole `gorm:"type:varchar(20)"`
 	ParentID      *uint64
-	Parent        *Device `gorm:"foreignKey:ParentID"`
+	Parent        *Device  `gorm:"foreignKey:ParentID"`
+	Children      []Device `gorm:"foreignKey:ParentID"`
 	Name          string
 	LastSeen      *time.Time
 	CreatedAt     time.Time

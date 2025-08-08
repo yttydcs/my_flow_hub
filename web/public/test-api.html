@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Test</title>
+</head>
+<body>
+    <h1>API Connection Test</h1>
+    <button onclick="testAPI()">Test API</button>
+    <pre id="result"></pre>
+
+    <script>
+        async function testAPI() {
+            const resultElement = document.getElementById('result');
+            try {
+                console.log('Testing API connection...');
+                const response = await fetch('http://localhost:8090/api/nodes');
+                const data = await response.json();
+                
+                resultElement.textContent = 'Success:\n' + JSON.stringify(data, null, 2);
+                console.log('API Response:', data);
+            } catch (error) {
+                resultElement.textContent = 'Error:\n' + error.message;
+                console.error('API Error:', error);
+            }
+        }
+        
+        // Auto test on load
+        testAPI();
+    </script>
+</body>
+</html>

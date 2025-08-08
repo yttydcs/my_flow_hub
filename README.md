@@ -32,6 +32,10 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | **管理后台** | | |
 | BFF 架构 | ✅ 已实现 | `manager` 服务作为前端的后端。 |
 | 特权节点认证 | ✅ 已实现 | `manager` 节点使用 Token 进行注册。 |
+| WebSocket 管理客户端 | ✅ 已实现 | Manager 通过 WebSocket 连接到中枢/中继。 |
+| RESTful 管理API | ✅ 已实现 | 提供节点管理、变量操作、消息发送等API。 |
+| 数据统一处理 | ✅ 已实现 | Manager 通过 Server 获取数据，不直接访问数据库。 |
+| 设备父级关系 | ✅ 已实现 | 自动维护设备的层级关系。 |
 | **工具** | | |
 | Web GUI 调试客户端 | ✅ 已实现 | `web-client/` 目录下的独立HTML文件。 |
 | **其他** | | |
@@ -41,14 +45,13 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 
 ## 项目结构
 
+-   **`pkg/`**: 共享的 Go 包，可被多个项目复用。
+    -   `config/`: 配置加载和管理。
+    -   `database/`: 数据库模型和操作。
+    -   `protocol/`: 定义通信协议的 Go 结构体。
 -   **`server/`**: Go 核心消息服务端。
     -   `cmd/myflowhub/main.go`: `main` 包，程序入口。
-    -   `internal/`: 核心逻辑。
-        -   `config/`: 配置加载。
-        -   `database/`: 数据库模型和初始化。
-        -   `hub/`: WebSocket 中心和消息路由逻辑。
-    -   `pkg/`: 可共享的包。
-        -   `protocol/`: 定义通信协议的 Go 结构体。
+    -   `internal/hub/`: WebSocket 中心和消息路由逻辑。
 -   **`manager/`**: Go 后台管理服务 (BFF)。
     -   `cmd/manager/main.go`: `main` 包，程序入口。
 -   **`web/`**: Vue 3 前端管理界面。
@@ -57,9 +60,9 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 ## 如何运行
 
 1.  **配置**:
-    *   打开 `server/config.json`。
-    *   在 `Database` 部分，将 `Password` 修改为您本地 PostgreSQL 的真实密码。
-    *   （可选）在 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
+    *   打开 `server/config.json`，在 `Database` 部分，将 `Password` 修改为您本地 PostgreSQL 的真实密码。
+    *   打开 `manager/config.json`，确保数据库配置与 server 一致，并设置正确的 `ManagerToken`。
+    *   （可选）在 `server/config.json` 的 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
 2.  **启动核心服务**:
     ```bash
     cd server
@@ -79,11 +82,25 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
     npm run dev
     ```
 5.  **访问**:
-    *   **管理后台**: 在浏览器中打开 `http://localhost:5173` (Vite 开发服务器的默认地址)。
-    *   **调试客户端**: 在文件浏览器中打开 `web-client/index.html`。
+    *   **核心服务WebSocket**: `ws://localhost:8080/ws`
+    *   **管理API服务**: `http://localhost:8090/api/`
+    *   **管理后台前端**: `http://localhost:5173` (Vite 开发服务器)
+    *   **调试客户端**: 打开 `web-client/index.html`
 
 ## 下一步计划
 
-1.  **实现 Manager API**: 在 `manager` 服务中，实现连接到核心服务、获取数据并向前端提供 API 的逻辑。
-2.  **构建前端界面**: 在 `web` 项目中，使用 Naive UI 组件构建一个可以展示节点树、查看和修改变量的完整管理界面。
-3.  **实现权限系统**: 基于 `access_permissions` 表，为变量的读写和消息的发送实现完整的权限检查逻辑。
+1.  **完善前端界面**: 在 `web` 项目中，使用 Naive UI 组件构建完整的管理界面，集成 Manager API。
+2.  **实现权限系统**: 基于 `access_permissions` 表，为变量的读写和消息的发送实现完整的权限检查逻辑。
+3.  **增强管理功能**: 
+    - 实时监控节点状态
+    - 批量操作支持
+    - 历史数据查询
+    - 系统日志查看
+4.  **性能优化**: 
+    - 实现二进制协议支持
+    - 添加消息压缩
+    - 优化数据库查询性能
+5.  **部署和运维**:
+    - Docker 容器化支持
+    - 配置管理优化
+    - 监控和告警系统
