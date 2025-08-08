@@ -16,10 +16,10 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | 功能点 | 状态 | 备注 |
 | :--- | :--- | :--- |
 | **核心网络** | | |
-| 统一服务端（中枢/中继） | ✅ 已实现 | 通过有无上级配置来区分角色。 |
+| 统一服务端（中枢/中继） | ✅ 已实现 | 通过 `config.json` 配置。 |
 | 服务端自举注册 | ✅ 已实现 | 服务器启动时会在数据库中为自己创建持久化身份。 |
 | 节点动态注册与认证 | ✅ 已实现 | 客户端可通过 `hardwareId` 注册并获取数字ID和密钥。 |
-| 客户端身份持久化 | ✅ 已实现 | Web客户端使用 `localStorage`，中继使用临时文件。 |
+| 客户端身份持久化 | ✅ 已实现 | Web客户端使用 `localStorage`。 |
 | 并发安全的连接管理 | ✅ 已实现 | 采用 Hub-and-Spoke 模型，保证并发安全。 |
 | 分层消息路由 | ✅ 已实现 | 支持点对点、广播和向上传递。 |
 | **变量池** | | |
@@ -29,80 +29,61 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | **双向绑定** | | |
 | 下行通知（变量变更） | ✅ 已实现 | 变量被修改后，会主动通知在线的所属节点。 |
 | 上线状态同步 | ✅ 已实现 | 节点认证成功后，会收到其变量池的完整初始状态。 |
+| **管理后台** | | |
+| BFF 架构 | ✅ 已实现 | `manager` 服务作为前端的后端。 |
+| 特权节点认证 | ✅ 已实现 | `manager` 节点使用 Token 进行注册。 |
 | **工具** | | |
-| Web GUI 调试客户端 | ✅ 已实现 | 功能全面的Web界面，用于测试所有核心功能。 |
+| Web GUI 调试客户端 | ✅ 已实现 | `web-client/` 目录下的独立HTML文件。 |
 | **其他** | | |
-| 外部化配置 | ⏳ **下一步** | 将数据库连接等信息移至配置文件。 |
+| 外部化配置 | ✅ 已实现 | 所有关键配置均在 `config.json` 中。 |
 | 权限管理 | ❌ 未实现 | 当前默认允许所有操作。 |
 | 二进制协议支持 | ❌ 未实现 | 当前使用JSON，未来可优化。 |
 
 ## 项目结构
 
-### `server/` - Go 后端服务
-
-这是项目核心的 Go 服务端应用。
-
--   **`cmd/myflowhub/main.go`**: 项目的主入口。它负责加载配置、初始化数据库、并根据配置启动中枢和/或中继服务。
--   **`internal/`**: 存放所有不对外暴露的内部包，这是 Go 项目的标准实践。
-    -   **`config/`**:
-        -   `config.go`: 定义了 `Config` 结构体，并提供了 `LoadConfig` 函数来从 `config.json` 加载配置。
-        -   `config.json`: 默认的配置文件。
-    -   **`database/`**:
-        -   `database.go`: 负责初始化到 PostgreSQL 的连接，并使用 GORM 自动迁移数据库模式。
-        -   `models.go`: 定义了与数据库表对应的 GORM 模型（如 `Device`, `DeviceVariable`）。
-    -   **`hub/`**: 实现了 WebSocket 的核心逻辑。
-        -   `hub.go`: 定义了 `Server` 结构体（即 Hub），并包含了其主运行循环 `Run()` 和核心的消息路由逻辑 `routeMessage()`。
-        -   `handlers.go`: 定义了 `Client` 结构体和处理新 WebSocket 连接的 HTTP handler。
-        -   `bootstrap.go`: 实现了服务器的自举逻辑，确保每个服务器实例在数据库中都有自己的持久化身份。
-        -   `parent_connector.go`: 实现了作为中继时，连接和维护与上级服务器关系的所有逻辑。
--   **`pkg/`**: 存放可以在项目外部共享的包。
-    -   **`protocol/`**:
-        -   `types.go`: 定义了客户端和服务端之间通信所使用的所有消息结构体（如 `BaseMessage`, `AuthRequestPayload`）。
--   **`go.mod`, `go.sum`**: Go 模块文件，管理项目依赖。
-
-### `web/` - Vue 3 前端管理界面
-
-这是使用 Vue 3 + Vite + Naive UI 构建的现代化后台管理界面。
-
--   **`src/`**: 前端源代码。
-    -   `App.vue`: 根组件，集成了 Naive UI 的全局提供者。
-    -   `main.ts`: 前端应用入口。
-    -   `router/`: Vue Router 的配置。
-    -   `views/`: 存放页面的视图组件，例如 `DashboardView.vue`。
--   **`index.html`**: 单页面应用的 HTML 入口。
--   **`package.json`**: Node.js 项目文件，管理前端依赖和脚本。
--   **`vite.config.ts`**: Vite 构建工具的配置文件。
-
-### `web-client/` - 简单调试客户端
-
-一个独立的、无依赖的 `index.html` 文件，用于快速、轻量地测试和调试 WebSocket 服务端的核心功能。
+-   **`server/`**: Go 核心消息服务端。
+    -   `cmd/myflowhub/main.go`: `main` 包，程序入口。
+    -   `internal/`: 核心逻辑。
+        -   `config/`: 配置加载。
+        -   `database/`: 数据库模型和初始化。
+        -   `hub/`: WebSocket 中心和消息路由逻辑。
+    -   `pkg/`: 可共享的包。
+        -   `protocol/`: 定义通信协议的 Go 结构体。
+-   **`manager/`**: Go 后台管理服务 (BFF)。
+    -   `cmd/manager/main.go`: `main` 包，程序入口。
+-   **`web/`**: Vue 3 前端管理界面。
+-   **`web-client/`**: 用于快速调试的、独立的 HTML 客户端。
 
 ## 如何运行
 
-1.  **配置后端**:
-    *   打开 `server/internal/config/config.json`。
+1.  **配置**:
+    *   打开 `server/config.json`。
     *   在 `Database` 部分，将 `Password` 修改为您本地 PostgreSQL 的真实密码。
     *   （可选）在 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
-2.  **启动后端服务**:
+2.  **启动核心服务**:
     ```bash
     cd server
     go run ./cmd/myflowhub
     ```
-    服务器将启动，并托管前端静态文件。
-3.  **开发前端**:
+3.  **启动管理后台服务**:
+    *   打开一个新的终端。
+    ```bash
+    cd manager
+    go run ./cmd/manager
+    ```
+4.  **开发前端**:
     *   打开一个新的终端。
     ```bash
     cd web
     npm install
     npm run dev
     ```
-    这会启动一个带热重载的前端开发服务器。
-4.  **访问管理后台**:
-    *   在浏览器中打开 `http://localhost:5173` (Vite 开发服务器的默认地址) 或后端服务地址（如 `http://localhost:8080`）。
+5.  **访问**:
+    *   **管理后台**: 在浏览器中打开 `http://localhost:5173` (Vite 开发服务器的默认地址)。
+    *   **调试客户端**: 在文件浏览器中打开 `web-client/index.html`。
 
 ## 下一步计划
 
-1.  **完善配置管理**: 将所有硬编码的配置（如数据库DSN、监听地址等）移动到外部配置文件中（例如 `config.json` 或环境变量）。
-2.  **实现权限系统**: 基于 `access_permissions` 表，为变量的读写和消息的发送实现完整的权限检查逻辑。
-3.  **优化数据模型**: 为变量增加时间戳和版本号，以处理并发更新和实现更复杂的同步策略。
-4.  **二进制协议**: 设计并实现基于 Protocol Buffers 或类似技术的二进制通信协议，以大幅降低带宽占用。
+1.  **实现 Manager API**: 在 `manager` 服务中，实现连接到核心服务、获取数据并向前端提供 API 的逻辑。
+2.  **构建前端界面**: 在 `web` 项目中，使用 Naive UI 组件构建一个可以展示节点树、查看和修改变量的完整管理界面。
+3.  **实现权限系统**: 基于 `access_permissions` 表，为变量的读写和消息的发送实现完整的权限检查逻辑。

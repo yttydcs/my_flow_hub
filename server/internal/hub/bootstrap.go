@@ -1,7 +1,7 @@
 package hub
 
 import (
-	"myflowhub/server/internal/database"
+	"myflowhub/pkg/database"
 
 	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"

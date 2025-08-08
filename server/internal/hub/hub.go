@@ -3,8 +3,8 @@ package hub
 import (
 	"encoding/json"
 	"fmt"
-	"myflowhub/poc/protocol"
-	"myflowhub/server/internal/database"
+	"myflowhub/pkg/database"
+	"myflowhub/pkg/protocol"
 	"net/http"
 	"regexp"
 	"strings"
@@ -67,11 +67,11 @@ func (s *Server) Run() {
 		case <-s.Register:
 			log.Info().Msg("一个新客户端已连接，等待认证...")
 		case client := <-s.Unregister:
-			if client.deviceID != 0 {
-				if _, ok := s.Clients[client.deviceID]; ok {
-					delete(s.Clients, client.deviceID)
-					close(client.send)
-					log.Info().Uint64("clientID", client.deviceID).Int("total_clients", len(s.Clients)).Msg("客户端已从 Hub 注销")
+			if client.DeviceID != 0 {
+				if _, ok := s.Clients[client.DeviceID]; ok {
+					delete(s.Clients, client.DeviceID)
+					close(client.Send)
+					log.Info().Uint64("clientID", client.DeviceID).Int("total_clients", len(s.Clients)).Msg("客户端已从 Hub 注销")
 				}
 			}
 		case hubMessage := <-s.Broadcast:
@@ -92,25 +92,25 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 
 	if msg.Type == "auth_request" {
 		if s.handleAuth(sourceClient, msg) {
-			s.Clients[sourceClient.deviceID] = sourceClient
-			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中认证成功并注册")
+			s.Clients[sourceClient.DeviceID] = sourceClient
+			log.Info().Uint64("clientID", sourceClient.DeviceID).Msg("客户端在 Hub 中认证成功并注册")
 			go s.syncVarsOnLogin(sourceClient)
 		}
 		return
 	}
 	if msg.Type == "register_request" {
 		if s.handleRegister(sourceClient, msg) {
-			s.Clients[sourceClient.deviceID] = sourceClient
-			log.Info().Uint64("clientID", sourceClient.deviceID).Msg("客户端在 Hub 中注册成功并注册")
+			s.Clients[sourceClient.DeviceID] = sourceClient
+			log.Info().Uint64("clientID", sourceClient.DeviceID).Msg("客户端在 Hub 中注册成功并注册")
 		}
 		return
 	}
 
-	if sourceClient.deviceID == 0 {
+	if sourceClient.DeviceID == 0 {
 		log.Warn().Msg("匿名客户端尝试发送非认证/注册消息")
 		return
 	}
-	msg.Source = sourceClient.deviceID
+	msg.Source = sourceClient.DeviceID
 
 	switch msg.Type {
 	case "var_update":
@@ -130,7 +130,7 @@ func (s *Server) routeGenericMessage(sourceClient *Client, msg protocol.BaseMess
 
 	if client, ok := s.Clients[msg.Target]; ok {
 		select {
-		case client.send <- messageBytes:
+		case client.Send <- messageBytes:
 		default:
 			log.Warn().Uint64("clientID", msg.Target).Msg("客户端发送缓冲区已满，消息被丢弃")
 		}
@@ -145,9 +145,9 @@ func (s *Server) routeGenericMessage(sourceClient *Client, msg protocol.BaseMess
 	if msg.Target == 0 {
 		log.Info().Msg("正在处理广播消息...")
 		for id, client := range s.Clients {
-			if id != sourceClient.deviceID {
+			if id != sourceClient.DeviceID {
 				select {
-				case client.send <- messageBytes:
+				case client.Send <- messageBytes:
 				default:
 					log.Warn().Uint64("clientID", id).Msg("客户端发送缓冲区已满，消息被丢弃")
 				}
@@ -176,7 +176,7 @@ func (s *Server) Start() {
 		go s.connectToParent()
 	}
 
-	http.HandleFunc("/ws", s.handleSubordinateConnection)
+	http.HandleFunc("/ws", s.HandleSubordinateConnection)
 	log.Info().Str("address", s.ListenAddr).Msg("服务端启动，监听下级连接")
 	if err := http.ListenAndServe(s.ListenAddr, nil); err != nil {
 		log.Fatal().Err(err).Msg("无法启动监听服务")
@@ -199,7 +199,7 @@ func (s *Server) handleAuth(client *Client, msg protocol.BaseMessage) bool {
 		return false
 	}
 
-	client.deviceID = device.DeviceUID
+	client.DeviceID = device.DeviceUID
 	return true
 }
 
@@ -233,7 +233,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 		return false
 	}
 
-	client.deviceID = newDevice.DeviceUID
+	client.DeviceID = newDevice.DeviceUID
 
 	response := protocol.BaseMessage{
 		ID:   msg.ID,
@@ -244,7 +244,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 			"secretKey": "default-secret",
 		},
 	}
-	client.send <- mustMarshal(response)
+	client.Send <- mustMarshal(response)
 	return true
 }
 
@@ -267,7 +267,7 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 			deviceIdentifier = parts[0]
 			varName = parts[1]
 		} else {
-			deviceIdentifier = fmt.Sprintf("[%d]", client.deviceID)
+			deviceIdentifier = fmt.Sprintf("[%d]", client.DeviceID)
 			varName = fqdn
 		}
 
@@ -314,7 +314,7 @@ func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
 			deviceIdentifier = parts[0]
 			varName = parts[1]
 		} else {
-			deviceIdentifier = fmt.Sprintf("[%d]", client.deviceID)
+			deviceIdentifier = fmt.Sprintf("[%d]", client.DeviceID)
 			varName = query
 		}
 
@@ -343,7 +343,7 @@ func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
 	response := protocol.BaseMessage{
 		ID:        uuid.New().String(),
 		Source:    s.DeviceID,
-		Target:    client.deviceID,
+		Target:    client.DeviceID,
 		Type:      "response",
 		Timestamp: time.Now(),
 		Payload: map[string]interface{}{
@@ -354,12 +354,12 @@ func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
 			},
 		},
 	}
-	client.send <- mustMarshal(response)
+	client.Send <- mustMarshal(response)
 }
 
 func (s *Server) syncVarsOnLogin(client *Client) {
 	var variables []database.DeviceVariable
-	database.DB.Where("owner_device_id = ?", client.deviceID).Find(&variables)
+	database.DB.Where("owner_device_id = ?", client.DeviceID).Find(&variables)
 
 	if len(variables) == 0 {
 		return
@@ -372,8 +372,8 @@ func (s *Server) syncVarsOnLogin(client *Client) {
 		varsMap[v.VariableName] = val
 	}
 
-	s.notifyVarChange(client.deviceID, s.DeviceID, varsMap)
-	log.Info().Uint64("clientID", client.deviceID).Msg("已完成上线变量同步")
+	s.notifyVarChange(client.DeviceID, s.DeviceID, varsMap)
+	log.Info().Uint64("clientID", client.DeviceID).Msg("已完成上线变量同步")
 }
 
 func (s *Server) notifyVarChange(targetDeviceID, sourceDeviceID uint64, variables map[string]interface{}) {
@@ -388,7 +388,7 @@ func (s *Server) notifyVarChange(targetDeviceID, sourceDeviceID uint64, variable
 				"variables": variables,
 			},
 		}
-		targetClient.send <- mustMarshal(notification)
+		targetClient.Send <- mustMarshal(notification)
 	}
 }
 

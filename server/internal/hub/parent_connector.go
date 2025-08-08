@@ -2,7 +2,7 @@ package hub
 
 import (
 	"encoding/json"
-	"myflowhub/poc/protocol"
+	"myflowhub/pkg/protocol"
 	"net/url"
 	"time"
 

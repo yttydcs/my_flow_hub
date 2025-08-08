@@ -46,7 +46,9 @@
     **Payload 结构:**
     ```json
     {
-      "hardwareId": "device-hardware-unique-id" // e.g., MAC address, CPU serial
+      "hardwareId": "device-hardware-unique-id", // e.g., MAC address, CPU serial
+      "role": "manager", // 可选, 用于注册特权节点
+      "token": "a-super-secret-manager-token" // 可选, 配合 role 使用
     }
     ```
 

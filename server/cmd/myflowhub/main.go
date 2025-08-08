@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
-	"myflowhub/server/internal/config"
-	"myflowhub/server/internal/database"
+	"myflowhub/pkg/config"
+	"myflowhub/pkg/database"
 	"myflowhub/server/internal/hub"
 	"os"
 	"time"
