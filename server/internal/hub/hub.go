@@ -30,6 +30,7 @@ type Server struct {
 	Broadcast  chan *HubMessage
 	Register   chan *Client
 	Unregister chan *Client
+	router     *Router
 }
 
 // isValidVarName 检查变量名是否有效
@@ -37,7 +38,7 @@ var IsValidVarName = regexp.MustCompile(`^[\p{Han}A-Za-z0-9_]+$`).MatchString
 
 // NewServer 创建一个新的服务端实例
 func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
-	return &Server{
+	s := &Server{
 		ParentAddr: parentAddr,
 		ListenAddr: listenAddr,
 		HardwareID: hardwareID,
@@ -49,7 +50,10 @@ func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
 		Broadcast:  make(chan *HubMessage, 256),
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
+		router:     NewRouter(),
 	}
+	s.registerRoutes()
+	return s
 }
 
 // Run 启动 hub 的主循环
@@ -82,53 +86,67 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 
 	sourceClient := hubMessage.Client
 
-	if msg.Type == "auth_request" {
-		if s.handleAuth(sourceClient, msg) {
-			s.Clients[sourceClient.DeviceID] = sourceClient
-			log.Info().Uint64("clientID", sourceClient.DeviceID).Msg("客户端在 Hub 中认证成功并注册")
-			go s.syncVarsOnLogin(sourceClient)
-		}
-		return
-	}
-	if msg.Type == "manager_auth" {
-		if s.handleManagerAuth(sourceClient, msg) {
-			s.Clients[sourceClient.DeviceID] = sourceClient
-			log.Info().Uint64("clientID", sourceClient.DeviceID).Msg("管理员在 Hub 中认证成功并注册")
-		}
-		return
-	}
-	if msg.Type == "register_request" {
-		if s.handleRegister(sourceClient, msg) {
-			s.Clients[sourceClient.DeviceID] = sourceClient
-			log.Info().Uint64("clientID", sourceClient.DeviceID).Msg("客户端在 Hub 中注册成功并注册")
-		}
+	// 检查是否为认证或注册消息
+	isAuthOrRegister := msg.Type == "auth_request" || msg.Type == "manager_auth" || msg.Type == "register_request"
+
+	// 如果客户端未认证，且消息不是认证/注册类型，则拒绝处理
+	if sourceClient.DeviceID == 0 && !isAuthOrRegister {
+		log.Warn().Str("type", msg.Type).Msg("匿名客户端尝试发送非认证/注册消息")
 		return
 	}
 
-	if sourceClient.DeviceID == 0 {
-		log.Warn().Msg("匿名客户端尝试发送非认证/注册消息")
-		return
+	// 为已认证的客户端消息设置来源ID
+	if sourceClient.DeviceID != 0 {
+		msg.Source = sourceClient.DeviceID
 	}
-	msg.Source = sourceClient.DeviceID
 
-	switch msg.Type {
-	case "var_update":
-		s.handleVarUpdate(sourceClient, msg)
-	case "vars_query":
-		s.handleVarsQuery(sourceClient, msg)
-	case "query_nodes":
-		s.handleQueryNodes(sourceClient, msg)
-	case "query_variables":
-		s.handleQueryVariables(sourceClient, msg)
-	case "msg_send":
-		s.routeGenericMessage(sourceClient, msg)
-	default:
-		log.Warn().Str("type", msg.Type).Msg("收到未知的消息类型")
+	s.router.Serve(s, sourceClient, msg)
+}
+
+// registerRoutes 注册所有消息类型的处理函数
+func (s *Server) registerRoutes() {
+	// 认证和注册
+	s.router.HandleFunc("auth_request", handleAuthRequest)
+	s.router.HandleFunc("manager_auth", handleManagerAuthRequest)
+	s.router.HandleFunc("register_request", handleRegisterRequest)
+
+	// 核心功能
+	s.router.HandleFunc("var_update", handleVarUpdate)
+	s.router.HandleFunc("vars_query", handleVarsQuery)
+	s.router.HandleFunc("msg_send", routeGenericMessage)
+
+	// 管理功能
+	s.router.HandleFunc("query_nodes", handleQueryNodes)
+	s.router.HandleFunc("query_variables", handleQueryVariables)
+}
+
+// handleAuthRequest 封装了原始的认证逻辑
+func handleAuthRequest(s *Server, client *Client, msg protocol.BaseMessage) {
+	if s.handleAuth(client, msg) {
+		s.Clients[client.DeviceID] = client
+		log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中认证成功并注册")
+		go s.syncVarsOnLogin(client)
+	}
+}
+
+// handleManagerAuthRequest 封装了原始的管理员认证逻辑
+func handleManagerAuthRequest(s *Server, client *Client, msg protocol.BaseMessage) {
+	if s.handleManagerAuth(client, msg) {
+		s.Clients[client.DeviceID] = client
+		log.Info().Uint64("clientID", client.DeviceID).Msg("管理员在 Hub 中认证成功并注册")
+	}
+}
+
+// handleRegisterRequest 封装了原始的注册逻辑
+func handleRegisterRequest(s *Server, client *Client, msg protocol.BaseMessage) {
+	if s.handleRegister(client, msg) {
+		s.Clients[client.DeviceID] = client
+		log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中注册成功并注册")
 	}
 }
 
 // routeGenericMessage 处理通用的点对点或广播消息
-func (s *Server) routeGenericMessage(sourceClient *Client, msg protocol.BaseMessage) {
+func routeGenericMessage(s *Server, client *Client, msg protocol.BaseMessage) {
 	messageBytes := mustMarshal(msg)
 
 	if client, ok := s.Clients[msg.Target]; ok {
@@ -147,10 +165,10 @@ func (s *Server) routeGenericMessage(sourceClient *Client, msg protocol.BaseMess
 
 	if msg.Target == 0 {
 		log.Info().Msg("正在处理广播消息...")
-		for id, client := range s.Clients {
-			if id != sourceClient.DeviceID {
+		for id, c := range s.Clients {
+			if id != client.DeviceID {
 				select {
-				case client.Send <- messageBytes:
+				case c.Send <- messageBytes:
 				default:
 					log.Warn().Uint64("clientID", id).Msg("客户端发送缓冲区已满，消息被丢弃")
 				}

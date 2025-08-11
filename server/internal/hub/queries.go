@@ -17,7 +17,7 @@ type DeviceTreeNode struct {
 }
 
 // buildDeviceTree 构建设备树形结构
-func (s *Server) buildDeviceTree(devices []database.Device) []DeviceTreeNode {
+func buildDeviceTree(devices []database.Device) []DeviceTreeNode {
 	// 创建设备映射，便于查找
 	deviceMap := make(map[uint64]*DeviceTreeNode)
 	var rootDevices []DeviceTreeNode
@@ -48,7 +48,7 @@ func (s *Server) buildDeviceTree(devices []database.Device) []DeviceTreeNode {
 }
 
 // handleQueryNodes 处理节点查询请求
-func (s *Server) handleQueryNodes(client *Client, msg protocol.BaseMessage) {
+func handleQueryNodes(s *Server, client *Client, msg protocol.BaseMessage) {
 	var devices []database.Device
 
 	// 获取所有设备，包括Parent信息
@@ -71,7 +71,7 @@ func (s *Server) handleQueryNodes(client *Client, msg protocol.BaseMessage) {
 	}
 
 	// 构建带有完整子节点信息的设备树
-	deviceTree := s.buildDeviceTree(devices)
+	deviceTree := buildDeviceTree(devices)
 
 	response := protocol.BaseMessage{
 		ID:        uuid.New().String(),
@@ -90,10 +90,10 @@ func (s *Server) handleQueryNodes(client *Client, msg protocol.BaseMessage) {
 }
 
 // handleQueryVariables 处理变量查询请求
-func (s *Server) handleQueryVariables(client *Client, msg protocol.BaseMessage) {
+func handleQueryVariables(s *Server, client *Client, msg protocol.BaseMessage) {
 	payload, ok := msg.Payload.(map[string]interface{})
 	if !ok {
-		s.sendErrorResponse(client, msg.ID, "Invalid payload format")
+		sendErrorResponse(s, client, msg.ID, "Invalid payload format")
 		return
 	}
 
@@ -112,7 +112,7 @@ func (s *Server) handleQueryVariables(client *Client, msg protocol.BaseMessage) 
 	var variables []database.DeviceVariable
 	if err := query.Find(&variables).Error; err != nil {
 		log.Error().Err(err).Msg("查询变量列表失败")
-		s.sendErrorResponse(client, msg.ID, "Failed to query variables")
+		sendErrorResponse(s, client, msg.ID, "Failed to query variables")
 		return
 	}
 
@@ -133,7 +133,7 @@ func (s *Server) handleQueryVariables(client *Client, msg protocol.BaseMessage) 
 }
 
 // sendErrorResponse 发送错误响应
-func (s *Server) sendErrorResponse(client *Client, originalID, errorMsg string) {
+func sendErrorResponse(s *Server, client *Client, originalID, errorMsg string) {
 	response := protocol.BaseMessage{
 		ID:        uuid.New().String(),
 		Source:    s.DeviceID,

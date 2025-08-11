@@ -36,7 +36,7 @@ func (s *Server) handleAuth(client *Client, msg protocol.BaseMessage) bool {
 	client.DeviceID = device.DeviceUID
 
 	// 更新设备的 parent 关系
-	s.updateDeviceParent(device.ID, s.DeviceID)
+	updateDeviceParent(s, device.ID, s.DeviceID)
 
 	return true
 }
@@ -134,7 +134,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 	client.DeviceID = newDevice.DeviceUID
 
 	// 更新设备的 parent 关系
-	s.updateDeviceParent(newDevice.ID, s.DeviceID)
+	updateDeviceParent(s, newDevice.ID, s.DeviceID)
 
 	response := protocol.BaseMessage{
 		ID:   msg.ID,
@@ -150,7 +150,7 @@ func (s *Server) handleRegister(client *Client, msg protocol.BaseMessage) bool {
 }
 
 // updateDeviceParent 更新设备的父级关系
-func (s *Server) updateDeviceParent(deviceID, parentDeviceUID uint64) {
+func updateDeviceParent(s *Server, deviceID, parentDeviceUID uint64) {
 	// 获取父设备的数据库ID
 	var parentDevice database.Device
 	if err := database.DB.Where("device_uid = ?", parentDeviceUID).First(&parentDevice).Error; err != nil {
@@ -167,7 +167,7 @@ func (s *Server) updateDeviceParent(deviceID, parentDeviceUID uint64) {
 }
 
 // handleVarUpdate 处理变量更新
-func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
+func handleVarUpdate(s *Server, client *Client, msg protocol.BaseMessage) {
 	payload, ok := msg.Payload.(map[string]interface{})
 	if !ok {
 		return
@@ -220,7 +220,7 @@ func (s *Server) handleVarUpdate(client *Client, msg protocol.BaseMessage) {
 }
 
 // handleVarsQuery 处理变量查询
-func (s *Server) handleVarsQuery(client *Client, msg protocol.BaseMessage) {
+func handleVarsQuery(s *Server, client *Client, msg protocol.BaseMessage) {
 	var payload protocol.VarsQueryPayload
 	jsonPayload, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(jsonPayload, &payload)
@@ -300,12 +300,12 @@ func (s *Server) syncVarsOnLogin(client *Client) {
 		varsMap[v.VariableName] = val
 	}
 
-	s.notifyVarChange(client.DeviceID, s.DeviceID, varsMap)
+	notifyVarChange(s, client.DeviceID, s.DeviceID, varsMap)
 	log.Info().Uint64("clientID", client.DeviceID).Msg("已完成上线变量同步")
 }
 
 // notifyVarChange 通知变量变更
-func (s *Server) notifyVarChange(targetDeviceID, sourceDeviceID uint64, variables map[string]interface{}) {
+func notifyVarChange(s *Server, targetDeviceID, sourceDeviceID uint64, variables map[string]interface{}) {
 	if targetClient, ok := s.Clients[targetDeviceID]; ok {
 		notification := protocol.BaseMessage{
 			ID:        uuid.New().String(),
