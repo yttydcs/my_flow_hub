@@ -100,7 +100,10 @@ func (c *HubClient) readLoop() {
 		default:
 			var msg protocol.BaseMessage
 			if err := c.conn.ReadJSON(&msg); err != nil {
-				log.Error().Err(err).Msg("读取消息失败")
+				log.Error().Err(err).Msg("读取消息失败，将尝试重连...")
+				c.conn.Close()
+				c.setConnected(false)
+				go c.reconnect()
 				return
 			}
 
@@ -118,6 +121,23 @@ func (c *HubClient) readLoop() {
 			default:
 				log.Warn().Msg("响应通道已满，丢弃消息")
 			}
+		}
+	}
+}
+
+// reconnect 自动重连
+func (c *HubClient) reconnect() {
+	for {
+		select {
+		case <-c.stopCh:
+			return
+		default:
+			log.Info().Msg("正在尝试重新连接...")
+			if err := c.Connect(); err == nil {
+				log.Info().Msg("重新连接成功")
+				return
+			}
+			time.Sleep(5 * time.Second)
 		}
 	}
 }

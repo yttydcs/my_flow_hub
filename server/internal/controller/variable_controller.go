@@ -7,6 +7,7 @@ import (
 	"myflowhub/pkg/protocol"
 	"myflowhub/server/internal/hub"
 	"myflowhub/server/internal/service"
+	"strconv"
 	"strings"
 
 	"github.com/rs/zerolog/log"
@@ -27,7 +28,7 @@ func NewVariableController(service *service.VariableService, deviceService *serv
 	}
 }
 
-// HandleVarsQuery 处理变量查询请求
+// HandleVarsQuery 处理来自直接客户端的变量查询请求
 func (c *VariableController) HandleVarsQuery(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var payload protocol.VarsQueryPayload
 	jsonPayload, _ := json.Marshal(msg.Payload)
@@ -62,6 +63,49 @@ func (c *VariableController) HandleVarsQuery(s *hub.Server, client *hub.Client, 
 			"results": results,
 		},
 	})
+}
+
+// HandleQueryVariables 处理来自 manager 的变量查询请求
+func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	payload, ok := msg.Payload.(map[string]interface{})
+	if !ok {
+		s.SendErrorResponse(client, msg.ID, "Invalid payload format")
+		return
+	}
+
+	if deviceIDStr, ok := payload["deviceId"].(string); ok && deviceIDStr != "" {
+		// 按设备ID查询
+		deviceID, err := strconv.ParseUint(deviceIDStr, 10, 64)
+		if err != nil {
+			s.SendErrorResponse(client, msg.ID, "Invalid deviceId")
+			return
+		}
+		device, err := c.deviceService.GetDeviceByUID(deviceID)
+		if err != nil {
+			s.SendErrorResponse(client, msg.ID, "Device not found")
+			return
+		}
+		variables, err := c.service.GetVariablesByDeviceID(device.ID)
+		if err != nil {
+			s.SendErrorResponse(client, msg.ID, "Failed to get variables")
+			return
+		}
+		s.SendResponse(client, msg.ID, map[string]interface{}{
+			"success": true,
+			"data":    variables,
+		})
+	} else {
+		// 查询所有变量
+		variables, err := c.service.GetAllVariables()
+		if err != nil {
+			s.SendErrorResponse(client, msg.ID, "Failed to get all variables")
+			return
+		}
+		s.SendResponse(client, msg.ID, map[string]interface{}{
+			"success": true,
+			"data":    variables,
+		})
+	}
 }
 
 // HandleVarUpdate 处理变量更新请求

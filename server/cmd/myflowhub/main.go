@@ -59,7 +59,8 @@ func main() {
 
 	// 注册路由
 	server.RegisterRoute("query_nodes", deviceController.HandleQueryNodes)
-	server.RegisterRoute("query_variables", variableController.HandleVarsQuery)
+	server.RegisterRoute("query_variables", variableController.HandleQueryVariables)
+	server.RegisterRoute("vars_query", variableController.HandleVarsQuery)
 	server.RegisterRoute("var_update", variableController.HandleVarUpdate)
 	server.RegisterRoute("auth_request", authController.HandleAuthRequest)
 	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)

@@ -34,3 +34,8 @@ func (s *VariableService) UpsertVariable(variable *database.DeviceVariable) erro
 func (s *VariableService) GetVariableByDeviceUIDAndVarName(deviceUID, varName string) (*database.DeviceVariable, error) {
 	return s.repo.FindByDeviceUIDAndVarName(deviceUID, varName)
 }
+
+// GetAllVariables 获取所有变量
+func (s *VariableService) GetAllVariables() ([]database.DeviceVariable, error) {
+	return s.repo.FindAll()
+}

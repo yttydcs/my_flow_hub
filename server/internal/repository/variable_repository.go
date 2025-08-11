@@ -41,6 +41,13 @@ func (r *VariableRepository) Upsert(variable *database.DeviceVariable) error {
 		FirstOrCreate(variable).Error
 }
 
+// FindAll 返回所有变量
+func (r *VariableRepository) FindAll() ([]database.DeviceVariable, error) {
+	var variables []database.DeviceVariable
+	err := r.db.Preload("Device").Find(&variables).Error
+	return variables, err
+}
+
 // FindByDeviceUIDAndVarName 根据设备 UID 和变量名查找
 func (r *VariableRepository) FindByDeviceUIDAndVarName(deviceUID, varName string) (*database.DeviceVariable, error) {
 	var targetDevice database.Device
