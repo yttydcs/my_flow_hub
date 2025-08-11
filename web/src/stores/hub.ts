@@ -43,12 +43,17 @@ export const useHubStore = defineStore('hub', () => {
     try {
       console.log('fetchDeviceTree: Calling apiService.getDeviceTree()')
       const response = await apiService.getDeviceTree()
-      console.log('fetchDeviceTree: Response received:', response)
+      console.log('fetchDeviceTree: Response received:', JSON.stringify(response, null, 2))
       
       if (response.success && response.data) {
         devices.value = response.data
         lastUpdated.value = new Date()
         console.log('fetchDeviceTree: Success, devices updated:', devices.value.length, 'devices')
+      } else if (response.data) {
+        // 如果没有success字段但有data字段，直接使用data
+        devices.value = response.data
+        lastUpdated.value = new Date()
+        console.log('fetchDeviceTree: Success (without success field), devices updated:', devices.value.length, 'devices')
       } else {
         error.value = response.message || '获取设备树失败'
         console.log('fetchDeviceTree: Failed with message:', error.value)
@@ -70,12 +75,21 @@ export const useHubStore = defineStore('hub', () => {
       const response = deviceUID ? 
         await apiService.getDeviceVariables(deviceUID) :
         await apiService.getAllVariables()
+      
+      console.log('fetchVariables: Response received:', JSON.stringify(response, null, 2))
         
       if (response.success && response.data) {
         variables.value = response.data
         lastUpdated.value = new Date()
+        console.log('fetchVariables: Success, variables updated:', variables.value.length, 'variables')
+      } else if (response.data) {
+        // 如果没有success字段但有data字段，直接使用data
+        variables.value = response.data
+        lastUpdated.value = new Date()
+        console.log('fetchVariables: Success (without success field), variables updated:', variables.value.length, 'variables')
       } else {
         error.value = response.message || '获取变量失败'
+        console.log('fetchVariables: Failed with message:', error.value)
       }
     } catch (err) {
       error.value = err instanceof Error ? err.message : '网络请求失败'

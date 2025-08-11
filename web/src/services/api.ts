@@ -67,6 +67,50 @@ class ApiService {
     })
   }
 
+  // 设备管理CRUD操作
+  async createDevice(data: { hardwareId: string; name: string; role: string; parentId?: number }): Promise<ApiResponse> {
+    return this.request('/nodes', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async updateDevice(data: { id: number; name: string; role: string; parentId?: number }): Promise<ApiResponse> {
+    return this.request('/nodes', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteDevice(id: number): Promise<ApiResponse> {
+    return this.request('/nodes', {
+      method: 'DELETE',
+      body: JSON.stringify({ id })
+    })
+  }
+
+  // 变量管理CRUD操作
+  async createVariable(data: { name: string; value: any; deviceId: number }): Promise<ApiResponse> {
+    return this.request('/variables', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async updateVariableNew(data: { id: number; name: string; value: any }): Promise<ApiResponse> {
+    return this.request('/variables', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    })
+  }
+
+  async deleteVariable(id: number): Promise<ApiResponse> {
+    return this.request('/variables', {
+      method: 'DELETE',
+      body: JSON.stringify({ id })
+    })
+  }
+
   // 调试：获取数据库信息
   async getDebugInfo(): Promise<ApiResponse> {
     return this.request('/debug/db')

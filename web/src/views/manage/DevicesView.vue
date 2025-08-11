@@ -78,6 +78,35 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 编辑设备弹窗 -->
+    <n-modal v-model:show="showEditModal" preset="dialog" title="编辑设备">
+      <n-form :model="editDevice" label-placement="left" :label-width="100">
+        <n-form-item label="硬件ID">
+          <n-input v-model:value="editDevice.hardwareId" disabled />
+        </n-form-item>
+        <n-form-item label="设备名称">
+          <n-input v-model:value="editDevice.name" placeholder="设备显示名称" />
+        </n-form-item>
+        <n-form-item label="设备角色">
+          <n-select v-model:value="editDevice.role" :options="roleOptions" />
+        </n-form-item>
+        <n-form-item label="父设备">
+          <n-select 
+            v-model:value="editDevice.parentId" 
+            :options="parentOptions"
+            placeholder="选择父设备（可选）"
+            clearable
+          />
+        </n-form-item>
+      </n-form>
+      <template #action>
+        <n-space>
+          <n-button @click="showEditModal = false">取消</n-button>
+          <n-button type="primary" @click="handleUpdateDevice">更新</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -85,6 +114,7 @@
 import { ref, computed, onMounted, h } from 'vue'
 import { useHubStore } from '@/stores/hub'
 import { useMessage } from 'naive-ui'
+import { apiService } from '@/services/api'
 import {
   NH2, NSpace, NInput, NSelect, NButton, NIcon, NDataTable,
   NModal, NForm, NFormItem, NBadge, NTag, NPopconfirm
@@ -105,9 +135,19 @@ const loading = ref(false)
 const searchKeyword = ref('')
 const selectedRole = ref('')
 const showAddModal = ref(false)
+const showEditModal = ref(false)
 
 // 新设备表单
 const newDevice = ref({
+  hardwareId: '',
+  name: '',
+  role: 'node',
+  parentId: null
+})
+
+// 编辑设备表单
+const editDevice = ref({
+  id: 0,
   hardwareId: '',
   name: '',
   role: 'node',
@@ -252,21 +292,87 @@ const refreshData = async () => {
 
 // 添加设备
 const handleAddDevice = async () => {
-  // TODO: 实现添加设备逻辑
-  message.info('添加设备功能开发中...')
-  showAddModal.value = false
+  try {
+    const response = await apiService.createDevice({
+      hardwareId: newDevice.value.hardwareId,
+      name: newDevice.value.name,
+      role: newDevice.value.role,
+      parentId: newDevice.value.parentId || undefined
+    })
+    
+    if (response.success) {
+      message.success('设备添加成功')
+      showAddModal.value = false
+      // 重置表单
+      newDevice.value = {
+        hardwareId: '',
+        name: '',
+        role: 'node',
+        parentId: null
+      }
+      // 刷新数据
+      refreshData()
+    } else {
+      message.error(response.message || '添加设备失败')
+    }
+  } catch (error) {
+    console.error('添加设备失败:', error)
+    message.error('添加设备失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  }
 }
 
 // 编辑设备
 const handleEditDevice = (device: any) => {
-  // TODO: 实现编辑设备逻辑
-  message.info('编辑设备功能开发中...')
+  editDevice.value = {
+    id: device.ID,
+    hardwareId: device.HardwareID,
+    name: device.Name || '',
+    role: device.Role,
+    parentId: device.ParentID || null
+  }
+  showEditModal.value = true
+}
+
+// 更新设备
+const handleUpdateDevice = async () => {
+  try {
+    const response = await apiService.updateDevice({
+      id: editDevice.value.id,
+      name: editDevice.value.name,
+      role: editDevice.value.role,
+      parentId: editDevice.value.parentId || undefined
+    })
+    
+    if (response.success) {
+      message.success('设备更新成功')
+      showEditModal.value = false
+      // 刷新数据
+      refreshData()
+    } else {
+      message.error(response.message || '更新设备失败')
+    }
+  } catch (error) {
+    console.error('更新设备失败:', error)
+    message.error('更新设备失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  }
 }
 
 // 删除设备
 const handleDeleteDevice = async (deviceId: number) => {
-  // TODO: 实现删除设备逻辑
-  message.info('删除设备功能开发中...')
+  try {
+    const response = await apiService.deleteDevice(deviceId)
+    
+    if (response.success) {
+      message.success('设备删除成功')
+      // 刷新数据
+      refreshData()
+    } else {
+      message.error(response.message || '删除设备失败')
+    }
+  } catch (error) {
+    console.error('删除设备失败:', error)
+    message.error('删除设备失败: ' + (error instanceof Error ? error.message : '未知错误'))
+  }
 }
 
 onMounted(() => {

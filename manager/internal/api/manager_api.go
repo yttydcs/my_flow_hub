@@ -54,10 +54,20 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case path == "nodes" && r.Method == "GET":
 		api.handleGetNodes(w, r)
+	case path == "nodes" && r.Method == "POST":
+		api.handleCreateDevice(w, r)
+	case path == "nodes" && r.Method == "PUT":
+		api.handleUpdateDevice(w, r)
+	case path == "nodes" && r.Method == "DELETE":
+		api.handleDeleteDevice(w, r)
 	case path == "variables" && r.Method == "GET":
 		api.handleGetVariables(w, r)
 	case path == "variables" && r.Method == "POST":
-		api.handleUpdateVariables(w, r)
+		api.handleCreateVariable(w, r)
+	case path == "variables" && r.Method == "PUT":
+		api.handleUpdateVariable(w, r)
+	case path == "variables" && r.Method == "DELETE":
+		api.handleDeleteVariable(w, r)
 	case path == "message" && r.Method == "POST":
 		api.handleSendMessage(w, r)
 	case path == "debug/db" && r.Method == "GET":
@@ -292,4 +302,291 @@ func (api *ManagerAPI) writeError(w http.ResponseWriter, statusCode int, message
 		"error":   message,
 	})
 	log.Error().Int("status", statusCode).Str("error", message).Msg("API error")
+}
+
+// CreateDeviceRequest 创建设备请求结构体
+type CreateDeviceRequest struct {
+	HardwareID string  `json:"hardwareId"`
+	Name       string  `json:"name"`
+	Role       string  `json:"role"`
+	ParentID   *uint64 `json:"parentId"`
+}
+
+// UpdateDeviceRequest 更新设备请求结构体
+type UpdateDeviceRequest struct {
+	ID       uint64  `json:"id"`
+	Name     string  `json:"name"`
+	Role     string  `json:"role"`
+	ParentID *uint64 `json:"parentId"`
+}
+
+// DeleteDeviceRequest 删除设备请求结构体
+type DeleteDeviceRequest struct {
+	ID uint64 `json:"id"`
+}
+
+// CreateVariableRequest 创建变量请求结构体
+type CreateVariableRequest struct {
+	Name          string      `json:"name"`
+	Value         interface{} `json:"value"`
+	OwnerDeviceID uint64      `json:"deviceId"`
+}
+
+// UpdateVariableRequest 更新变量请求结构体
+type UpdateVariableRequestNew struct {
+	ID    uint64      `json:"id"`
+	Name  string      `json:"name"`
+	Value interface{} `json:"value"`
+}
+
+// DeleteVariableRequest 删除变量请求结构体
+type DeleteVariableRequest struct {
+	ID uint64 `json:"id"`
+}
+
+// handleCreateDevice 创建设备
+func (api *ManagerAPI) handleCreateDevice(w http.ResponseWriter, r *http.Request) {
+	var req CreateDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 验证必填字段
+	if req.HardwareID == "" || req.Role == "" {
+		api.writeError(w, http.StatusBadRequest, "HardwareID and Role are required")
+		return
+	}
+
+	// 转换角色类型
+	var role database.DeviceRole
+	switch req.Role {
+	case "node":
+		role = database.RoleNode
+	case "relay":
+		role = database.RoleRelay
+	case "hub":
+		role = database.RoleHub
+	case "manager":
+		role = database.RoleManager
+	default:
+		api.writeError(w, http.StatusBadRequest, "Invalid role. Must be one of: node, relay, hub, manager")
+		return
+	}
+
+	// 创建设备对象
+	device := database.Device{
+		HardwareID: req.HardwareID,
+		Name:       req.Name,
+		Role:       role,
+		ParentID:   req.ParentID,
+	}
+
+	// 保存到数据库
+	if err := database.DB.Create(&device).Error; err != nil {
+		api.writeError(w, http.StatusInternalServerError, "Failed to create device: "+err.Error())
+		return
+	}
+
+	api.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Device created successfully",
+		"data":    device,
+	})
+}
+
+// handleUpdateDevice 更新设备
+func (api *ManagerAPI) handleUpdateDevice(w http.ResponseWriter, r *http.Request) {
+	var req UpdateDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 查找设备
+	var device database.Device
+	if err := database.DB.First(&device, req.ID).Error; err != nil {
+		api.writeError(w, http.StatusNotFound, "Device not found")
+		return
+	}
+
+	// 转换角色类型
+	var role database.DeviceRole
+	switch req.Role {
+	case "node":
+		role = database.RoleNode
+	case "relay":
+		role = database.RoleRelay
+	case "hub":
+		role = database.RoleHub
+	case "manager":
+		role = database.RoleManager
+	default:
+		api.writeError(w, http.StatusBadRequest, "Invalid role. Must be one of: node, relay, hub, manager")
+		return
+	}
+
+	// 更新字段
+	device.Name = req.Name
+	device.Role = role
+	device.ParentID = req.ParentID
+
+	// 保存更改
+	if err := database.DB.Save(&device).Error; err != nil {
+		api.writeError(w, http.StatusInternalServerError, "Failed to update device: "+err.Error())
+		return
+	}
+
+	api.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Device updated successfully",
+		"data":    device,
+	})
+}
+
+// handleDeleteDevice 删除设备
+func (api *ManagerAPI) handleDeleteDevice(w http.ResponseWriter, r *http.Request) {
+	var req DeleteDeviceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 检查设备是否存在
+	var device database.Device
+	if err := database.DB.First(&device, req.ID).Error; err != nil {
+		api.writeError(w, http.StatusNotFound, "Device not found")
+		return
+	}
+
+	// 删除设备
+	if err := database.DB.Delete(&device).Error; err != nil {
+		api.writeError(w, http.StatusInternalServerError, "Failed to delete device: "+err.Error())
+		return
+	}
+
+	api.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Device deleted successfully",
+	})
+}
+
+// handleCreateVariable 创建变量
+func (api *ManagerAPI) handleCreateVariable(w http.ResponseWriter, r *http.Request) {
+	var req CreateVariableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 验证必填字段
+	if req.Name == "" {
+		api.writeError(w, http.StatusBadRequest, "Variable name is required")
+		return
+	}
+
+	// 检查设备是否存在
+	var device database.Device
+	if err := database.DB.First(&device, req.OwnerDeviceID).Error; err != nil {
+		api.writeError(w, http.StatusNotFound, "Device not found")
+		return
+	}
+
+	// 转换值为JSON格式
+	valueJSON, err := json.Marshal(req.Value)
+	if err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid variable value")
+		return
+	}
+
+	// 创建变量对象
+	variable := database.DeviceVariable{
+		VariableName:  req.Name,
+		Value:         valueJSON,
+		OwnerDeviceID: req.OwnerDeviceID,
+	}
+
+	// 保存到数据库
+	if err := database.DB.Create(&variable).Error; err != nil {
+		api.writeError(w, http.StatusInternalServerError, "Failed to create variable: "+err.Error())
+		return
+	}
+
+	// 预加载设备信息
+	database.DB.Preload("Device").First(&variable, variable.ID)
+
+	api.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Variable created successfully",
+		"data":    variable,
+	})
+}
+
+// handleUpdateVariable 更新变量
+func (api *ManagerAPI) handleUpdateVariable(w http.ResponseWriter, r *http.Request) {
+	var req UpdateVariableRequestNew
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 查找变量
+	var variable database.DeviceVariable
+	if err := database.DB.First(&variable, req.ID).Error; err != nil {
+		api.writeError(w, http.StatusNotFound, "Variable not found")
+		return
+	}
+
+	// 转换值为JSON格式
+	valueJSON, err := json.Marshal(req.Value)
+	if err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid variable value")
+		return
+	}
+
+	// 更新字段
+	variable.VariableName = req.Name
+	variable.Value = valueJSON
+
+	// 保存更改
+	if err := database.DB.Save(&variable).Error; err != nil {
+		api.writeError(w, http.StatusInternalServerError, "Failed to update variable: "+err.Error())
+		return
+	}
+
+	// 预加载设备信息
+	database.DB.Preload("Device").First(&variable, variable.ID)
+
+	api.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Variable updated successfully",
+		"data":    variable,
+	})
+}
+
+// handleDeleteVariable 删除变量
+func (api *ManagerAPI) handleDeleteVariable(w http.ResponseWriter, r *http.Request) {
+	var req DeleteVariableRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	// 检查变量是否存在
+	var variable database.DeviceVariable
+	if err := database.DB.First(&variable, req.ID).Error; err != nil {
+		api.writeError(w, http.StatusNotFound, "Variable not found")
+		return
+	}
+
+	// 删除变量
+	if err := database.DB.Delete(&variable).Error; err != nil {
+		api.writeError(w, http.StatusInternalServerError, "Failed to delete variable: "+err.Error())
+		return
+	}
+
+	api.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Variable deleted successfully",
+	})
 }

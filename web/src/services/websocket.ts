@@ -36,7 +36,9 @@ export function useWebSocket() {
     ws.value.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
-        hubStore.updateNodeData(data)
+        // 处理WebSocket消息，可能包含设备状态更新或变量更新
+        console.log('WebSocket message received:', data)
+        // TODO: 根据消息类型更新相应的状态
       } catch (e) {
         console.error("Failed to parse incoming message:", e)
       }

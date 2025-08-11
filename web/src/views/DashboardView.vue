@@ -2,17 +2,6 @@
   <div style="height: calc(100vh - 60px); overflow: hidden;">
     <!-- 状态卡片 -->
     <n-space style="padding: 24px; padding-bottom: 16px;" size="large">
-      <n-card style="min-width: 200px;">
-        <n-statistic label="连接状态" tabular-nums>
-          <n-tag :type="connectionStatus.type" size="large">
-            <template #icon>
-              <n-icon><component :is="connectionStatus.icon" /></n-icon>
-            </template>
-            {{ connectionStatus.text }}
-          </n-tag>
-        </n-statistic>
-      </n-card>
-      
       <n-card style="min-width: 150px;">
         <n-statistic label="设备数量" :value="deviceCount" />
       </n-card>
@@ -26,49 +15,22 @@
           {{ lastUpdated ? lastUpdated.toLocaleString() : '未更新' }}
         </n-statistic>
       </n-card>
-      
-      <n-button @click="handleRefreshAll" :loading="loading" type="primary" size="large">
-        <template #icon>
-          <n-icon><RefreshIcon /></n-icon>
-        </template>
-        刷新全部
-      </n-button>
     </n-space>
 
-    <!-- 主体布局 -->
-    <n-layout has-sider style="height: calc(100% - 120px); padding: 0 24px 24px;">
-      <!-- 左侧设备树 -->
-      <n-layout-sider
-        bordered
-        collapse-mode="width"
-        :collapsed-width="64"
-        :width="320"
-        show-trigger
-        content-style="padding: 16px;"
-      >
-        <DeviceTree />
-      </n-layout-sider>
-
-      <!-- 主要内容区域 -->
-      <n-layout has-sider>
-        <!-- 中间设备详情 -->
-        <n-layout-content content-style="padding: 24px;">
-          <DeviceDetails />
-        </n-layout-content>
-
-        <!-- 右侧变量管理 -->
-        <n-layout-sider
-          bordered
-          collapse-mode="width"
-          :collapsed-width="0"
-          :width="400"
-          show-trigger
-          content-style="padding: 16px;"
-        >
-          <VariableManager />
-        </n-layout-sider>
-      </n-layout>
-    </n-layout>
+    <!-- 设备树区域 -->
+    <div style="height: calc(100% - 120px); padding: 0 24px 24px;">
+      <n-card style="height: 100%;">
+        <template #header>
+          <n-space align="center">
+            <n-icon size="20"><TreeIcon /></n-icon>
+            <span>设备树</span>
+          </n-space>
+        </template>
+        <div style="height: calc(100% - 60px); overflow-y: auto; padding: 16px;">
+          <DeviceTree />
+        </div>
+      </n-card>
+    </div>
 
     <!-- 错误提示 -->
     <n-message-provider>
@@ -83,30 +45,21 @@
         {{ error }}
       </n-alert>
     </n-message-provider>
-
-    <!-- 加载指示器 -->
-    <n-back-top :right="40" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { 
-  NLayout, NLayoutSider, NLayoutContent, 
-  NSpace, NButton, NIcon, NTag, NStatistic, NAlert, 
-  NMessageProvider, NBackTop, NCard
+  NSpace, NIcon, NStatistic, NAlert, 
+  NMessageProvider, NCard
 } from 'naive-ui'
 import { 
-  Server as ServerIcon, 
-  Refresh as RefreshIcon, 
-  CheckmarkCircle as ConnectedIcon, 
-  CloseCircle as DisconnectedIcon 
+  GitNetwork as TreeIcon
 } from '@vicons/ionicons5'
 import { useHubStore } from '@/stores/hub'
 import { useMessage } from 'naive-ui'
 import DeviceTree from '@/components/DeviceTree.vue'
-import DeviceDetails from '@/components/DeviceDetails.vue'
-import VariableManager from '@/components/VariableManager.vue'
 
 const message = useMessage()
 const hubStore = useHubStore()
@@ -114,83 +67,36 @@ const hubStore = useHubStore()
 const {
   devices,
   variables,
-  selectedDevice,
-  loading,
-  error,
   deviceCount,
   lastUpdated,
+  error,
   clearError
 } = hubStore
 
-let refreshInterval: number | null = null
+let pollingInterval: number | null = null
 
-// 连接状态
-const connectionStatus = computed(() => {
-  console.log('Connection status check:', {
-    lastUpdated: lastUpdated,
-    loading: loading,
-    error: error,
-    deviceCount: deviceCount
-  })
+// 轮询数据更新
+const startPolling = () => {
+  // 立即执行一次
+  hubStore.fetchDeviceTree()
+  hubStore.fetchVariables()
   
-  // 如果正在加载，显示连接中
-  if (loading) {
-    return {
-      type: 'warning' as const,
-      icon: RefreshIcon,
-      text: '连接中...'
+  // 设置定时轮询
+  pollingInterval = window.setInterval(async () => {
+    try {
+      await hubStore.fetchDeviceTree()
+      await hubStore.fetchVariables()
+    } catch (err) {
+      console.error('Polling error:', err)
     }
-  }
-  
-  // 如果有错误，显示连接失败
-  if (error) {
-    return {
-      type: 'error' as const,
-      icon: DisconnectedIcon,
-      text: '连接失败'
-    }
-  }
-  
-  // 如果有数据（设备数量大于0），认为已连接
-  if (deviceCount > 0) {
-    return {
-      type: 'success' as const,
-      icon: ConnectedIcon,
-      text: '已连接'
-    }
-  }
-  
-  // 如果最近30秒内有更新，认为已连接
-  if (lastUpdated && (Date.now() - lastUpdated.getTime()) < 30000) {
-    return {
-      type: 'success' as const,
-      icon: ConnectedIcon,
-      text: '已连接'
-    }
-  }
-  
-  // 默认未连接状态
-  return {
-    type: 'error' as const,
-    icon: DisconnectedIcon,
-    text: '未连接'
-  }
-})
+  }, 1000) // 1秒轮询
+}
 
-// 刷新所有数据
-const handleRefreshAll = async () => {
-  console.log('handleRefreshAll: Starting...')
-  try {
-    await Promise.all([
-      hubStore.fetchDeviceTree(),
-      hubStore.fetchVariables()
-    ])
-    message.success('数据刷新完成')
-    console.log('handleRefreshAll: All requests completed successfully')
-  } catch (err) {
-    const errorMessage = '刷新失败：' + (err instanceof Error ? err.message : '未知错误')
-    message.error(errorMessage)
-    console.error('handleRefreshAll: Error occurred:', err)
+// 停止轮询
+const stopPolling = () => {
+  if (pollingInterval) {
+    clearInterval(pollingInterval)
+    pollingInterval = null
   }
 }
 
@@ -201,52 +107,25 @@ watch(() => error, (newError) => {
   }
 })
 
-// 监听设备选择变化
-watch(() => selectedDevice, (newDevice) => {
-  if (newDevice) {
-    // 当选择新设备时，可以执行一些操作
-    console.log('Selected device:', newDevice.Name || newDevice.HardwareID)
-  }
+// 组件挂载时开始轮询
+onMounted(() => {
+  console.log('DashboardView: Starting polling')
+  startPolling()
 })
 
-// 组件挂载时初始化数据
-onMounted(async () => {
-  console.log('DashboardView: onMounted called')
-  await handleRefreshAll()
-  
-  // 设置定期刷新
-  refreshInterval = window.setInterval(async () => {
-    if (!loading) {
-      await hubStore.fetchVariables()
-    }
-  }, 30000) // 每30秒刷新一次变量数据
-  
-  console.log('DashboardView: Refresh interval set')
-})
-
-// 组件卸载时清理定时器
+// 组件卸载时停止轮询
 onUnmounted(() => {
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-  }
+  console.log('DashboardView: Stopping polling')
+  stopPolling()
 })
 </script>
 
-<style scoped>
-.n-layout-sider {
-  background-color: #fafafa;
+<<style scoped>
+:deep(.n-card .n-card-header) {
+  padding-bottom: 8px;
 }
 
-.n-layout-content {
-  background-color: #f5f5f5;
-}
-
-:deep(.n-layout-sider .n-layout-sider-scroll-container) {
-  display: flex;
-  flex-direction: column;
-}
-
-:deep(.n-back-top) {
-  z-index: 999;
+:deep(.n-statistic) {
+  text-align: center;
 }
 </style>
