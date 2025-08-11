@@ -5,7 +5,9 @@ import (
 	"myflowhub/pkg/protocol"
 	"net/http"
 	"regexp"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -105,44 +107,13 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 
 // registerRoutes 注册所有消息类型的处理函数
 func (s *Server) registerRoutes() {
-	// 认证和注册
-	s.router.HandleFunc("auth_request", handleAuthRequest)
-	s.router.HandleFunc("manager_auth", handleManagerAuthRequest)
-	s.router.HandleFunc("register_request", handleRegisterRequest)
-
 	// 核心功能
-	s.router.HandleFunc("var_update", handleVarUpdate)
-	s.router.HandleFunc("vars_query", handleVarsQuery)
 	s.router.HandleFunc("msg_send", routeGenericMessage)
-
-	// 管理功能
-	s.router.HandleFunc("query_nodes", handleQueryNodes)
-	s.router.HandleFunc("query_variables", handleQueryVariables)
 }
 
-// handleAuthRequest 封装了原始的认证逻辑
-func handleAuthRequest(s *Server, client *Client, msg protocol.BaseMessage) {
-	if s.handleAuth(client, msg) {
-		s.Clients[client.DeviceID] = client
-		log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中认证成功并注册")
-		go s.syncVarsOnLogin(client)
-	}
-}
-
-// handleManagerAuthRequest 封装了原始的管理员认证逻辑
-func handleManagerAuthRequest(s *Server, client *Client, msg protocol.BaseMessage) {
-	if s.handleManagerAuth(client, msg) {
-		s.Clients[client.DeviceID] = client
-		log.Info().Uint64("clientID", client.DeviceID).Msg("管理员在 Hub 中认证成功并注册")
-	}
-}
-
-// handleRegisterRequest 封装了原始的注册逻辑
-func handleRegisterRequest(s *Server, client *Client, msg protocol.BaseMessage) {
-	if s.handleRegister(client, msg) {
-		s.Clients[client.DeviceID] = client
-		log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中注册成功并注册")
-	}
+// RegisterRoute 注册一个消息类型和对应的处理函数
+func (s *Server) RegisterRoute(msgType string, handler HandlerFunc) {
+	s.router.HandleFunc(msgType, handler)
 }
 
 // routeGenericMessage 处理通用的点对点或广播消息
@@ -210,4 +181,43 @@ func mustMarshal(msg protocol.BaseMessage) []byte {
 		panic(err)
 	}
 	return bytes
+}
+
+// SendResponse 发送一个通用的成功响应
+func (s *Server) SendResponse(client *Client, originalID string, payload map[string]interface{}) {
+	response := protocol.BaseMessage{
+		ID:        uuid.New().String(),
+		Source:    s.DeviceID,
+		Target:    client.DeviceID,
+		Type:      "response",
+		Timestamp: time.Now(),
+		Payload:   payload,
+	}
+	payload["original_id"] = originalID
+	client.Send <- mustMarshal(response)
+}
+
+// SendErrorResponse 发送一个错误响应
+func (s *Server) SendErrorResponse(client *Client, originalID, errorMsg string) {
+	s.SendResponse(client, originalID, map[string]interface{}{
+		"success": false,
+		"error":   errorMsg,
+	})
+}
+
+// NotifyVarChange 通知变量变更
+func (s *Server) NotifyVarChange(targetDeviceID, sourceDeviceID uint64, variables map[string]interface{}) {
+	if targetClient, ok := s.Clients[targetDeviceID]; ok {
+		notification := protocol.BaseMessage{
+			ID:        uuid.New().String(),
+			Source:    sourceDeviceID,
+			Target:    targetDeviceID,
+			Type:      "var_notify",
+			Timestamp: time.Now(),
+			Payload: map[string]interface{}{
+				"variables": variables,
+			},
+		}
+		targetClient.Send <- mustMarshal(notification)
+	}
 }

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"myflowhub/pkg/config"
 	"myflowhub/pkg/database"
+	"myflowhub/server/internal/controller"
 	"myflowhub/server/internal/hub"
+	"myflowhub/server/internal/repository"
+	"myflowhub/server/internal/service"
 	"os"
 	"time"
 
@@ -26,6 +29,20 @@ func main() {
 
 	database.InitDatabase(dsn, postgresDsn, dbConf.DBName)
 
+	// 初始化 repository
+	deviceRepo := repository.NewDeviceRepository(database.DB)
+	variableRepo := repository.NewVariableRepository(database.DB)
+
+	// 初始化 service
+	deviceService := service.NewDeviceService(deviceRepo)
+	variableService := service.NewVariableService(variableRepo)
+	authService := service.NewAuthService(deviceRepo, variableRepo)
+
+	// 初始化 controller
+	deviceController := controller.NewDeviceController(deviceService)
+	variableController := controller.NewVariableController(variableService, deviceService)
+	authController := controller.NewAuthController(authService, deviceService)
+
 	var server *hub.Server
 
 	if config.AppConfig.Relay.Enabled {
@@ -39,6 +56,14 @@ func main() {
 		log.Info().Msg("以中枢模式启动...")
 		server = hub.NewServer("", serverConf.ListenAddr, serverConf.HardwareID)
 	}
+
+	// 注册路由
+	server.RegisterRoute("query_nodes", deviceController.HandleQueryNodes)
+	server.RegisterRoute("query_variables", variableController.HandleVarsQuery)
+	server.RegisterRoute("var_update", variableController.HandleVarUpdate)
+	server.RegisterRoute("auth_request", authController.HandleAuthRequest)
+	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)
+	server.RegisterRoute("register_request", authController.HandleRegisterRequest)
 
 	server.Start() // 阻塞式启动
 }
