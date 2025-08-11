@@ -1,11 +1,4 @@
 {
-  "Database": {
-    "Host": "localhost",
-    "User": "postgres",
-    "Password": "123456",
-    "DBName": "myflowhub",
-    "Port": "5432"
-  },
   "Server": {
     "ListenAddr": ":8090",
     "HardwareID": "manager-001",

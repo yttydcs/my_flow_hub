@@ -1,11 +1,9 @@
 package main
 
 import (
-	"fmt"
 	"myflowhub/manager/internal/api"
 	"myflowhub/manager/internal/client"
 	"myflowhub/pkg/config"
-	"myflowhub/pkg/database"
 	"net/http"
 	"os"
 	"os/signal"
@@ -24,15 +22,6 @@ func main() {
 
 	// 加载配置
 	config.LoadConfig()
-
-	// 初始化数据库连接
-	dbConf := config.AppConfig.Database
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		dbConf.Host, dbConf.User, dbConf.Password, dbConf.DBName, dbConf.Port)
-	postgresDsn := fmt.Sprintf("host=%s user=%s password=%s port=%s sslmode=disable",
-		dbConf.Host, dbConf.User, dbConf.Password, dbConf.Port)
-
-	database.InitDatabase(dsn, postgresDsn, dbConf.DBName)
 
 	// 创建Hub客户端
 	hubAddr := config.AppConfig.Hub.Address

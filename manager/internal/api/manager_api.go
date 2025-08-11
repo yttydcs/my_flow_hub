@@ -7,9 +7,6 @@ import (
 
 	"myflowhub/manager/internal/api/handlers"
 	"myflowhub/manager/internal/client"
-	"myflowhub/manager/internal/repository"
-	"myflowhub/manager/internal/services"
-	"myflowhub/pkg/database"
 	"myflowhub/pkg/protocol"
 
 	"github.com/google/uuid"
@@ -18,29 +15,13 @@ import (
 
 // ManagerAPI 管理API结构体
 type ManagerAPI struct {
-	hubClient       *client.HubClient
-	deviceHandler   *handlers.DeviceHandler
-	variableHandler *handlers.VariableHandler
+	hubClient *client.HubClient
 }
 
 // NewManagerAPI 创建新的管理API实例
 func NewManagerAPI(hubClient *client.HubClient) *ManagerAPI {
-	// 初始化Repository层
-	deviceRepo := repository.NewDeviceRepository(database.DB)
-	variableRepo := repository.NewVariableRepository(database.DB)
-
-	// 初始化Service层
-	deviceService := services.NewDeviceService(deviceRepo, variableRepo, hubClient)
-	variableService := services.NewVariableService(variableRepo, deviceRepo, hubClient)
-
-	// 初始化Handler层
-	deviceHandler := handlers.NewDeviceHandler(deviceService)
-	variableHandler := handlers.NewVariableHandler(variableService)
-
 	return &ManagerAPI{
-		hubClient:       hubClient,
-		deviceHandler:   deviceHandler,
-		variableHandler: variableHandler,
+		hubClient: hubClient,
 	}
 }
 
@@ -70,26 +51,29 @@ func (api *ManagerAPI) corsMiddleware(handler http.HandlerFunc) http.HandlerFunc
 func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path[5:] // 去掉 "/api/" 前缀
 
+	deviceHandler := handlers.NewDeviceHandler(api.hubClient)
+	variableHandler := handlers.NewVariableHandler(api.hubClient)
+
 	switch {
 	// 设备相关路由
 	case path == "nodes" && r.Method == "GET":
-		api.deviceHandler.HandleGetDevices(w, r)
+		deviceHandler.HandleGetDevices(w, r)
 	case path == "nodes" && r.Method == "POST":
-		api.deviceHandler.HandleCreateDevice(w, r)
+		deviceHandler.HandleCreateDevice(w, r)
 	case path == "nodes" && r.Method == "PUT":
-		api.deviceHandler.HandleUpdateDevice(w, r)
+		deviceHandler.HandleUpdateDevice(w, r)
 	case path == "nodes" && r.Method == "DELETE":
-		api.deviceHandler.HandleDeleteDevice(w, r)
+		deviceHandler.HandleDeleteDevice(w, r)
 
 	// 变量相关路由
 	case path == "variables" && r.Method == "GET":
-		api.variableHandler.HandleGetVariables(w, r)
+		variableHandler.HandleGetVariables(w, r)
 	case path == "variables" && r.Method == "POST":
-		api.variableHandler.HandleCreateVariable(w, r)
+		variableHandler.HandleCreateVariable(w, r)
 	case path == "variables" && r.Method == "PUT":
-		api.variableHandler.HandleUpdateVariable(w, r)
+		variableHandler.HandleUpdateVariable(w, r)
 	case path == "variables" && r.Method == "DELETE":
-		api.variableHandler.HandleDeleteVariable(w, r)
+		variableHandler.HandleDeleteVariable(w, r)
 
 	// 其他路由
 	case path == "message" && r.Method == "POST":
@@ -152,47 +136,9 @@ func (api *ManagerAPI) handleSendMessage(w http.ResponseWriter, r *http.Request)
 
 // handleDebugDB 调试数据库连接和表结构
 func (api *ManagerAPI) handleDebugDB(w http.ResponseWriter, r *http.Request) {
-	// 检查数据库连接
-	sqlDB, err := database.DB.DB()
-	if err != nil {
-		api.writeError(w, http.StatusInternalServerError, "Database connection error: "+err.Error())
-		return
-	}
-
-	if err := sqlDB.Ping(); err != nil {
-		api.writeError(w, http.StatusInternalServerError, "Database ping failed: "+err.Error())
-		return
-	}
-
-	// 检查表是否存在
-	var tableCount int64
-	database.DB.Raw("SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'device_variables'").Scan(&tableCount)
-
-	// 检查设备数量
-	var deviceCount int64
-	database.DB.Model(&database.Device{}).Count(&deviceCount)
-
-	// 检查变量数量
-	var variableCount int64
-	database.DB.Model(&database.DeviceVariable{}).Count(&variableCount)
-
-	// 获取一些样本数据
-	var sampleDevices []database.Device
-	database.DB.Limit(3).Find(&sampleDevices)
-
-	var sampleVariables []database.DeviceVariable
-	database.DB.Preload("Device").Limit(3).Find(&sampleVariables)
-
 	api.writeJSON(w, map[string]interface{}{
 		"success": true,
-		"data": map[string]interface{}{
-			"database_connection":           "OK",
-			"device_variables_table_exists": tableCount > 0,
-			"device_count":                  deviceCount,
-			"variable_count":                variableCount,
-			"sample_devices":                sampleDevices,
-			"sample_variables":              sampleVariables,
-		},
+		"message": "Database connection has been removed from the manager.",
 	})
 }
 

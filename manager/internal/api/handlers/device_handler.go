@@ -2,127 +2,61 @@ package handlers
 
 import (
 	"encoding/json"
+	"myflowhub/manager/internal/client"
+	"myflowhub/pkg/protocol"
 	"net/http"
-	"strconv"
+	"time"
 
-	"myflowhub/manager/internal/services"
-
+	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
 // DeviceHandler 设备处理器
 type DeviceHandler struct {
-	deviceService *services.DeviceService
+	hubClient *client.HubClient
 }
 
 // NewDeviceHandler 创建设备处理器实例
-func NewDeviceHandler(deviceService *services.DeviceService) *DeviceHandler {
+func NewDeviceHandler(hubClient *client.HubClient) *DeviceHandler {
 	return &DeviceHandler{
-		deviceService: deviceService,
+		hubClient: hubClient,
 	}
 }
 
 // HandleGetDevices 处理获取设备列表
 func (h *DeviceHandler) HandleGetDevices(w http.ResponseWriter, r *http.Request) {
-	devices, err := h.deviceService.GetAllDevices()
+	req := protocol.BaseMessage{
+		ID:   uuid.New().String(),
+		Type: "query_nodes",
+	}
+
+	response, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "Failed to get devices: "+err.Error())
+		h.writeError(w, http.StatusInternalServerError, "Failed to get devices from hub: "+err.Error())
 		return
 	}
 
-	h.writeJSON(w, map[string]interface{}{
-		"success": true,
-		"data":    devices,
-	})
+	h.writeJSON(w, response.Payload)
 }
 
 // HandleCreateDevice 处理创建设备
 func (h *DeviceHandler) HandleCreateDevice(w http.ResponseWriter, r *http.Request) {
-	var req services.CreateDeviceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	device, err := h.deviceService.CreateDevice(req)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	h.writeJSON(w, map[string]interface{}{
-		"success": true,
-		"message": "Device created successfully",
-		"data":    device,
-	})
+	h.writeError(w, http.StatusNotImplemented, "Create device not implemented")
 }
 
 // HandleUpdateDevice 处理更新设备
 func (h *DeviceHandler) HandleUpdateDevice(w http.ResponseWriter, r *http.Request) {
-	var req services.UpdateDeviceRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	device, err := h.deviceService.UpdateDevice(req)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	h.writeJSON(w, map[string]interface{}{
-		"success": true,
-		"message": "Device updated successfully",
-		"data":    device,
-	})
+	h.writeError(w, http.StatusNotImplemented, "Update device not implemented")
 }
 
 // HandleDeleteDevice 处理删除设备
 func (h *DeviceHandler) HandleDeleteDevice(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		ID uint64 `json:"id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if err := h.deviceService.DeleteDevice(req.ID); err != nil {
-		h.writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	h.writeJSON(w, map[string]interface{}{
-		"success": true,
-		"message": "Device deleted successfully",
-	})
+	h.writeError(w, http.StatusNotImplemented, "Delete device not implemented")
 }
 
 // HandleGetDeviceByID 处理根据ID获取设备
 func (h *DeviceHandler) HandleGetDeviceByID(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Query().Get("id")
-	if idStr == "" {
-		h.writeError(w, http.StatusBadRequest, "Device ID is required")
-		return
-	}
-
-	id, err := strconv.ParseUint(idStr, 10, 64)
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "Invalid device ID")
-		return
-	}
-
-	device, err := h.deviceService.GetDeviceByID(id)
-	if err != nil {
-		h.writeError(w, http.StatusNotFound, "Device not found")
-		return
-	}
-
-	h.writeJSON(w, map[string]interface{}{
-		"success": true,
-		"data":    device,
-	})
+	h.writeError(w, http.StatusNotImplemented, "Get device by ID not implemented")
 }
 
 // writeJSON 写入JSON响应

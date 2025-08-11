@@ -191,6 +191,34 @@ func (c *HubClient) GetResponse(timeout time.Duration) (*protocol.BaseMessage, e
 	}
 }
 
+// SendRequest 发送请求并等待响应
+func (c *HubClient) SendRequest(req protocol.BaseMessage, timeout time.Duration) (*protocol.BaseMessage, error) {
+	if err := c.SendMessage(req); err != nil {
+		return nil, err
+	}
+
+	// 循环接收消息，直到找到匹配的响应
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
+		select {
+		case resp := <-c.responseCh:
+			payload, ok := resp.Payload.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if originalID, ok := payload["original_id"].(string); ok && originalID == req.ID {
+				return &resp, nil
+			}
+		case <-timer.C:
+			return nil, ErrTimeout
+		case <-c.stopCh:
+			return nil, ErrClientClosed
+		}
+	}
+}
+
 // IsConnected 检查连接状态
 func (c *HubClient) IsConnected() bool {
 	c.mu.RLock()
