@@ -108,6 +108,43 @@ func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Cli
 	}
 }
 
+// HandleVarDelete 处理变量删除请求
+func (c *VariableController) HandleVarDelete(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	payload, ok := msg.Payload.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	variables, ok := payload["variables"].([]interface{})
+	if !ok {
+		return
+	}
+
+	var deletedCount int
+	for _, v := range variables {
+		fqdn, _ := v.(string)
+		var deviceIdentifier, varName string
+		if strings.Contains(fqdn, ".") {
+			parts := strings.SplitN(fqdn, ".", 2)
+			deviceIdentifier = parts[0]
+			varName = parts[1]
+		} else {
+			deviceIdentifier = fmt.Sprintf("[%d]", client.DeviceID)
+			varName = fqdn
+		}
+
+		targetDevice, err := c.deviceService.GetDeviceByUIDOrName(deviceIdentifier)
+		if err != nil {
+			continue
+		}
+
+		if c.service.DeleteVariable(targetDevice.ID, varName) == nil {
+			deletedCount++
+		}
+	}
+	log.Info().Int("count", deletedCount).Msg("变量已删除")
+}
+
 // HandleVarUpdate 处理变量更新请求
 func (c *VariableController) HandleVarUpdate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	payload, ok := msg.Payload.(map[string]interface{})

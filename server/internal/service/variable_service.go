@@ -39,3 +39,8 @@ func (s *VariableService) GetVariableByDeviceUIDAndVarName(deviceUID, varName st
 func (s *VariableService) GetAllVariables() ([]database.DeviceVariable, error) {
 	return s.repo.FindAll()
 }
+
+// DeleteVariable 删除变量
+func (s *VariableService) DeleteVariable(ownerID uint64, name string) error {
+	return s.repo.Delete(ownerID, name)
+}

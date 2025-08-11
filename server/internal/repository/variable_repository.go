@@ -41,6 +41,11 @@ func (r *VariableRepository) Upsert(variable *database.DeviceVariable) error {
 		FirstOrCreate(variable).Error
 }
 
+// Delete 删除变量
+func (r *VariableRepository) Delete(ownerID uint64, name string) error {
+	return r.db.Where("owner_device_id = ? AND variable_name = ?", ownerID, name).Delete(&database.DeviceVariable{}).Error
+}
+
 // FindAll 返回所有变量
 func (r *VariableRepository) FindAll() ([]database.DeviceVariable, error) {
 	var variables []database.DeviceVariable

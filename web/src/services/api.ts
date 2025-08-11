@@ -97,17 +97,17 @@ class ApiService {
     })
   }
 
-  async updateVariableNew(data: { id: number; name: string; value: any }): Promise<ApiResponse> {
+  async updateVariableNew(data: { [key: string]: any }): Promise<ApiResponse> {
     return this.request('/variables', {
       method: 'PUT',
       body: JSON.stringify(data)
     })
   }
 
-  async deleteVariable(id: number): Promise<ApiResponse> {
+  async deleteVariable(data: { variables: string[] }): Promise<ApiResponse> {
     return this.request('/variables', {
       method: 'DELETE',
-      body: JSON.stringify({ id })
+      body: JSON.stringify(data)
     })
   }
 

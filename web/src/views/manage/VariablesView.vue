@@ -219,7 +219,7 @@ const columns: DataTableColumns = [
             icon: () => h(NIcon, null, { default: () => h(EditIcon) })
           }),
           h(NPopconfirm, {
-            onPositiveClick: () => handleDeleteVariable(row.ID)
+            onPositiveClick: () => handleDeleteVariable(row.OwnerDeviceID, row.VariableName)
           }, {
             default: () => '确认删除这个变量吗？',
             trigger: () => h(NButton, { 
@@ -295,11 +295,17 @@ const handleEditVariable = (variable: any) => {
 // 更新变量
 const handleUpdateVariable = async () => {
   try {
-    const response = await apiService.updateVariableNew({
-      id: editVariable.value.id,
-      name: editVariable.value.name,
-      value: editVariable.value.value
-    })
+    const device = hubStore.devices.find(d => d.ID.toString() === editVariable.value.deviceId)
+    if (!device) {
+      message.error('未找到设备')
+      return
+    }
+
+    const fqdn = `[${editVariable.value.deviceId}].${editVariable.value.name}`
+    const payload = {
+      [fqdn]: editVariable.value.value
+    }
+    const response = await apiService.updateVariableNew(payload)
     
     if (response.success) {
       message.success('变量更新成功')
@@ -316,9 +322,10 @@ const handleUpdateVariable = async () => {
 }
 
 // 删除变量
-const handleDeleteVariable = async (variableId: number) => {
+const handleDeleteVariable = async (deviceId:any, name:any) => {
   try {
-    const response = await apiService.deleteVariable(variableId)
+    const fqdn = `[${deviceId}].${name}`
+    const response = await apiService.deleteVariable({ variables: [fqdn] })
     
     if (response.success) {
       message.success('变量删除成功')

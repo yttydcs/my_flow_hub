@@ -80,7 +80,31 @@ func (h *VariableHandler) HandleUpdateVariable(w http.ResponseWriter, r *http.Re
 
 // HandleDeleteVariable 处理删除变量
 func (h *VariableHandler) HandleDeleteVariable(w http.ResponseWriter, r *http.Request) {
-	h.writeError(w, http.StatusNotImplemented, "Delete variable not implemented")
+	var reqBody struct {
+		Variables []string `json:"variables"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+		h.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	req := protocol.BaseMessage{
+		ID:   uuid.New().String(),
+		Type: "var_delete",
+		Payload: map[string]interface{}{
+			"variables": reqBody.Variables,
+		},
+	}
+
+	if err := h.hubClient.SendMessage(req); err != nil {
+		h.writeError(w, http.StatusInternalServerError, "Failed to send delete to hub: "+err.Error())
+		return
+	}
+
+	h.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": "Variable delete sent to hub",
+	})
 }
 
 // HandleGetVariableByID 处理根据ID获取变量

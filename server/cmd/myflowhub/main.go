@@ -62,6 +62,7 @@ func main() {
 	server.RegisterRoute("query_variables", variableController.HandleQueryVariables)
 	server.RegisterRoute("vars_query", variableController.HandleVarsQuery)
 	server.RegisterRoute("var_update", variableController.HandleVarUpdate)
+	server.RegisterRoute("var_delete", variableController.HandleVarDelete)
 	server.RegisterRoute("auth_request", authController.HandleAuthRequest)
 	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)
 	server.RegisterRoute("register_request", authController.HandleRegisterRequest)
