@@ -21,40 +21,61 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 
 返回数据库连接状态和基本统计信息，用于调试。
 
-### 3. 获取所有节点
+### 3. 设备管理
+
+#### 获取所有节点
 
 **GET** `/api/nodes`
 
 获取系统中的所有设备节点信息。
 
-**响应示例**:
+#### 创建设备
+
+**POST** `/api/nodes`
+
+创建一个新设备。
+
+**请求体**:
 ```json
 {
-  "success": true,
-  "data": [
-    {
-      "ID": 1,
-      "DeviceUID": 10001,
-      "HardwareID": "hub-001",
-      "Role": "hub",
-      "Name": "Main Hub",
-      "LastSeen": "2025-08-08T10:30:00Z",
-      "CreatedAt": "2025-08-08T09:00:00Z"
-    },
-    {
-      "ID": 2,
-      "DeviceUID": 10002,
-      "HardwareID": "node-001",
-      "Role": "node",
-      "Name": "Sensor Node 1",
-      "LastSeen": "2025-08-08T10:29:45Z",
-      "CreatedAt": "2025-08-08T09:15:00Z"
-    }
-  ]
+  "HardwareID": "new-device-001",
+  "Name": "New Sensor",
+  "Role": "node",
+  "ParentID": 1
 }
 ```
 
-### 3. 获取变量
+#### 更新设备
+
+**PUT** `/api/nodes`
+
+更新一个已存在的设备。
+
+**请求体**:
+```json
+{
+  "ID": 2,
+  "Name": "Updated Sensor Name",
+  "Role": "node"
+}
+```
+
+#### 删除设备
+
+**DELETE** `/api/nodes`
+
+删除一个设备及其所有关联的变量。
+
+**请求体**:
+```json
+{
+  "id": 2
+}
+```
+
+### 4. 变量管理
+
+#### 获取变量
 
 **GET** `/api/variables[?deviceId=<设备ID>]`
 
@@ -86,11 +107,11 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
-### 4. 更新变量
+#### 新增或更新变量
 
-**POST** `/api/variables`
+**PUT** `/api/variables`
 
-更新一个或多个变量的值。
+新增或更新一个或多个变量的值。
 
 **请求体**:
 ```json
@@ -108,6 +129,22 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 {
   "success": true,
   "message": "Variables update sent"
+}
+```
+
+#### 删除变量
+
+**DELETE** `/api/variables`
+
+删除一个或多个变量。
+
+**请求体**:
+```json
+{
+  "variables": [
+    "[10002].temperature",
+    "(Sensor Node 1).status"
+  ]
 }
 ```
 

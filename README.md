@@ -32,8 +32,8 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | **管理后台** | | |
 | BFF 架构 | ✅ 已实现 | `manager` 服务作为前端的后端。 |
 | 特权节点认证 | ✅ 已实现 | `manager` 节点使用 Token 进行注册。 |
-| WebSocket 管理客户端 | ✅ 已实现 | Manager 通过 WebSocket 连接到中枢/中继。 |
-| RESTful 管理API | ✅ 已实现 | 提供节点管理、变量操作、消息发送等API。 |
+| WebSocket 管理客户端 | ✅ 已实现 | Manager 通过 WebSocket 连接到中枢/中继，并支持自动重连。 |
+| RESTful 管理API | ✅ 已实现 | 提供节点和变量的增删改查、消息发送等API。 |
 | 数据统一处理 | ✅ 已实现 | Manager 通过 Server 获取数据，不直接访问数据库。 |
 | 设备父级关系 | ✅ 已实现 | 自动维护设备的层级关系。 |
 | **工具** | | |
@@ -51,9 +51,16 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
     -   `protocol/`: 定义通信协议的 Go 结构体。
 -   **`server/`**: Go 核心消息服务端。
     -   `cmd/myflowhub/main.go`: `main` 包，程序入口。
-    -   `internal/hub/`: WebSocket 中心和消息路由逻辑。
+    -   `internal/`: 采用`controller-service-repository`分层架构。
+        - `hub/`: WebSocket 连接管理和核心消息循环。
+        - `controller/`: 处理WebSocket消息，调用服务。
+        - `service/`: 封装核心业务逻辑。
+        - `repository/`: 数据持久化操作。
 -   **`manager/`**: Go 后台管理服务 (BFF)。
     -   `cmd/manager/main.go`: `main` 包，程序入口。
+    -   `internal/`:
+        - `api/`: 提供RESTful API。
+        - `client/`: 作为WebSocket客户端连接到`server`。
 -   **`web/`**: Vue 3 前端管理界面。
 -   **`web-client/`**: 用于快速调试的、独立的 HTML 客户端。
 
@@ -61,7 +68,7 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 
 1.  **配置**:
     *   打开 `server/config.json`，在 `Database` 部分，将 `Password` 修改为您本地 PostgreSQL 的真实密码。
-    *   打开 `manager/config.json`，确保数据库配置与 server 一致，并设置正确的 `ManagerToken`。
+    *   打开 `manager/config.json`，设置正确的 `ManagerToken`。
     *   （可选）在 `server/config.json` 的 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
 2.  **启动核心服务**:
     ```bash
