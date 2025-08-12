@@ -25,6 +25,7 @@
 
 <script setup lang="ts">
 import { computed, h } from 'vue'
+import { useAuthStore } from '@/stores/auth'
 import { useRouter, useRoute } from 'vue-router'
 import { 
   NLayout, NLayoutSider, NLayoutContent, NMenu
@@ -39,6 +40,7 @@ import {
 
 const router = useRouter()
 const route = useRoute()
+const auth = useAuthStore()
 
 // 当前选中的菜单项
 const currentMenuKey = computed(() => {
@@ -46,28 +48,15 @@ const currentMenuKey = computed(() => {
 })
 
 // 菜单选项
-const menuOptions: MenuOption[] = [
-  {
-    label: '设备管理',
-    key: 'manage-devices',
-    icon: () => h(DeviceIcon)
-  },
-  {
-    label: '变量管理',
-    key: 'manage-variables',
-    icon: () => h(VariableIcon)
-  },
-  {
-    label: '用户管理',
-    key: 'manage-users',
-    icon: () => h(UsersIcon)
-  },
-  {
-    label: '日志管理',
-    key: 'manage-logs',
-    icon: () => h(LogsIcon)
-  }
-]
+const menuOptions = computed<MenuOption[]>(() => {
+  const base: MenuOption[] = [
+    { label: '设备管理', key: 'manage-devices', icon: () => h(DeviceIcon) },
+    { label: '变量管理', key: 'manage-variables', icon: () => h(VariableIcon) }
+  ]
+  if (auth.isAdmin) base.push({ label: '用户管理', key: 'manage-users', icon: () => h(UsersIcon) })
+  base.push({ label: '日志管理', key: 'manage-logs', icon: () => h(LogsIcon) })
+  return base
+})
 
 // 处理菜单选择
 const handleMenuSelect = (key: string) => {

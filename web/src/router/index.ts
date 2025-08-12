@@ -38,7 +38,8 @@ const router = createRouter({
             {
               path: 'users',
               name: 'manage-users',
-              component: () => import('@/views/manage/UsersView.vue')
+              component: () => import('@/views/manage/UsersView.vue'),
+              meta: { adminOnly: true }
             },
             {
               path: 'logs',
@@ -57,13 +58,16 @@ const router = createRouter({
   ]
 })
 
-// 全局路由守卫：未登录只允许访问 /login
+// 全局路由守卫：未登录只允许访问 /login；adminOnly 页面仅管理员可进
 router.beforeEach((to) => {
   const auth = useAuthStore()
   if (!auth.isLoggedIn && to.name !== 'login') {
     return { name: 'login', replace: true }
   }
   if (auth.isLoggedIn && to.name === 'login') {
+    return { name: 'dashboard', replace: true }
+  }
+  if (to.meta && (to.meta as any).adminOnly && !auth.isAdmin) {
     return { name: 'dashboard', replace: true }
   }
 })

@@ -1,29 +1,181 @@
 <template>
   <div>
-    <n-h2>用户管理</n-h2>
-    
-    <n-space vertical size="large">
-      <!-- 功能开发中提示 -->
-      <n-alert type="info" title="功能开发中">
-        用户管理功能正在开发中，敬请期待...
-      </n-alert>
-
-      <!-- 占位内容 -->
-      <n-card>
-        <n-empty description="用户管理功能开发中">
-          <template #extra>
-            <n-button size="small">返回主页</n-button>
-          </template>
-        </n-empty>
-      </n-card>
+    <n-space align="center" justify="space-between" style="margin-bottom: 12px; width: 100%;">
+      <n-h2 style="margin: 0;">用户管理</n-h2>
+      <n-space>
+        <n-button type="primary" @click="openCreate">新建用户</n-button>
+        <n-button @click="loadUsers" :loading="loading">刷新</n-button>
+      </n-space>
     </n-space>
+
+    <n-data-table :columns="columns" :data="users" :loading="loading" :bordered="false" />
+
+    <!-- 创建/编辑用户弹窗 -->
+    <n-modal v-model:show="showEdit" preset="dialog" :title="editing ? '编辑用户' : '新建用户'">
+      <n-form :model="form" label-placement="left" label-width="96">
+        <n-form-item label="用户名" v-if="!editing">
+          <n-input v-model:value="form.username" placeholder="用户名" />
+        </n-form-item>
+        <n-form-item label="显示名">
+          <n-input v-model:value="form.displayName" placeholder="显示名" />
+        </n-form-item>
+        <n-form-item label="密码">
+          <n-input v-model:value="form.password" type="password" placeholder="初始密码（可留空）" />
+        </n-form-item>
+        <n-form-item label="禁用">
+          <n-switch v-model:value="form.disabled" />
+        </n-form-item>
+      </n-form>
+      <template #action>
+        <n-space>
+          <n-button @click="showEdit = false">取消</n-button>
+          <n-button type="primary" :loading="saving" @click="saveUser">保存</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <!-- 重置密码弹窗 -->
+    <n-modal v-model:show="showReset" preset="dialog" title="重置密码">
+      <n-form :model="resetForm" label-placement="left" label-width="96">
+        <n-form-item label="新密码">
+          <n-input v-model:value="resetForm.password" type="password" placeholder="输入新密码" />
+        </n-form-item>
+      </n-form>
+      <template #action>
+        <n-space>
+          <n-button @click="showReset = false">取消</n-button>
+          <n-button type="primary" :loading="saving" @click="confirmReset">确定</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
+  
 </template>
 
 <script setup lang="ts">
+import { h, onMounted, reactive, ref } from 'vue'
+import { useMessage, NButton, NButtonGroup, NIcon } from 'naive-ui'
 import {
-  NH2, NSpace, NAlert, NCard, NEmpty, NButton
+  NH2, NSpace, NDataTable, NModal, NForm, NFormItem, NInput, NSwitch
 } from 'naive-ui'
+import { apiService } from '@/services/api'
+import type { User } from '@/types/api'
+import { Pencil as PencilIcon, Trash as TrashIcon, Key as KeyIcon } from '@vicons/ionicons5'
+
+const message = useMessage()
+const loading = ref(false)
+const saving = ref(false)
+const users = ref<User[]>([])
+
+const showEdit = ref(false)
+const editing = ref(false)
+const currentId = ref<number | null>(null)
+const form = reactive<{ username: string; displayName?: string; password?: string; disabled?: boolean }>({ username: '', displayName: '', password: '', disabled: false })
+
+const showReset = ref(false)
+const resetForm = reactive<{ password: string }>({ password: '' })
+
+const columns = [
+  { title: 'ID', key: 'ID', width: 80 },
+  { title: '用户名', key: 'Username' },
+  { title: '显示名', key: 'DisplayName' },
+  { title: '状态', key: 'Disabled', render(row: User) { return row.Disabled ? '已禁用' : '启用' } },
+  {
+    title: '操作', key: 'actions', width: 220, render(row: User) {
+      return h(NButtonGroup, null, {
+        default: () => [
+          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑', icon: () => h(NIcon, null, { default: () => h(PencilIcon) }) }),
+          h(NButton, { size: 'small', type: 'warning', onClick: () => openReset(row) }, { default: () => '重置密码', icon: () => h(NIcon, null, { default: () => h(KeyIcon) }) }),
+          h(NButton, { size: 'small', type: 'error', onClick: () => delUser(row) }, { default: () => '删除', icon: () => h(NIcon, null, { default: () => h(TrashIcon) }) }),
+        ]
+      })
+    }
+  }
+]
+
+async function loadUsers() {
+  loading.value = true
+  try {
+    const res = await apiService.getUsers()
+    if (res.success) users.value = (res.data as User[]) || []
+    else message.error(res.message || '加载失败')
+  } catch (e) {
+    message.error('网络错误')
+  } finally {
+    loading.value = false
+  }
+}
+
+function openCreate() {
+  editing.value = false
+  currentId.value = null
+  form.username = ''
+  form.displayName = ''
+  form.password = ''
+  form.disabled = false
+  showEdit.value = true
+}
+
+function openEdit(row: User) {
+  editing.value = true
+  currentId.value = row.ID
+  form.username = row.Username
+  form.displayName = row.DisplayName || ''
+  form.password = ''
+  form.disabled = !!row.Disabled
+  showEdit.value = true
+}
+
+async function saveUser() {
+  saving.value = true
+  try {
+    if (editing.value && currentId.value) {
+      const payload: any = { id: currentId.value, displayName: form.displayName, disabled: form.disabled }
+      if (form.password) payload.password = form.password
+      const res = await apiService.updateUser(payload)
+      if (res.success) { message.success('已保存'); showEdit.value = false; loadUsers() } else message.error(res.message || '保存失败')
+    } else {
+      const res = await apiService.createUser({ username: form.username, displayName: form.displayName, password: form.password || '' })
+      if (res.success) { message.success('已创建'); showEdit.value = false; loadUsers() } else message.error(res.message || '创建失败')
+    }
+  } catch (e) {
+    message.error('网络错误')
+  } finally {
+    saving.value = false
+  }
+}
+
+function openReset(row: User) {
+  currentId.value = row.ID
+  resetForm.password = ''
+  showReset.value = true
+}
+
+async function confirmReset() {
+  if (!currentId.value) return
+  saving.value = true
+  try {
+    const res = await apiService.updateUser({ id: currentId.value, password: resetForm.password })
+    if (res.success) { message.success('密码已重置'); showReset.value = false } else message.error(res.message || '重置失败')
+  } catch (e) {
+    message.error('网络错误')
+  } finally {
+    saving.value = false
+    loadUsers()
+  }
+}
+
+async function delUser(row: User) {
+  if (!confirm(`确认删除用户 ${row.Username} ?`)) return
+  try {
+    const res = await apiService.deleteUser(row.ID)
+    if (res.success) { message.success('已删除'); loadUsers() } else message.error(res.message || '删除失败')
+  } catch (e) {
+    message.error('网络错误')
+  }
+}
+
+onMounted(loadUsers)
 </script>
 
 <style scoped>

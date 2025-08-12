@@ -33,6 +33,7 @@ func main() {
 	deviceRepo := repository.NewDeviceRepository(database.DB)
 	variableRepo := repository.NewVariableRepository(database.DB)
 	userRepo := repository.NewUserRepository(database.DB)
+	permRepo := repository.NewPermissionRepository(database.DB)
 
 	// 初始化 service
 	deviceService := service.NewDeviceService(deviceRepo, variableRepo, database.DB)
@@ -48,6 +49,7 @@ func main() {
 	authController := controller.NewAuthController(authService, deviceService)
 	// inject optional services
 	authController.SetSessionService(sessionService)
+	authController.SetPermissionRepository(permRepo)
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService)
 
@@ -81,7 +83,6 @@ func main() {
 	server.RegisterRoute("user_delete", userController.HandleUserDelete)
 
 	// 启动前：确保存在默认管理员并赋予所有权限
-	permRepo := repository.NewPermissionRepository(database.DB)
 	seedDefaultAdmin(userService, permRepo)
 	server.RegisterRoute("auth_request", authController.HandleAuthRequest)
 	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)

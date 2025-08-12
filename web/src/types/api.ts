@@ -46,3 +46,13 @@ export interface WSMessage {
   timestamp: string
   payload: any
 }
+
+// 用户类型
+export interface User {
+  ID: number
+  Username: string
+  DisplayName?: string
+  Disabled?: boolean
+  CreatedAt: string
+  UpdatedAt: string
+}

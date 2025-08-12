@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"myflowhub/pkg/protocol"
 	"myflowhub/server/internal/hub"
+	"myflowhub/server/internal/repository"
 	"myflowhub/server/internal/service"
 
 	"github.com/rs/zerolog/log"
@@ -15,6 +16,7 @@ type AuthController struct {
 	deviceService *service.DeviceService
 	session       *service.SessionService
 	perm          *service.PermissionService
+	permRepo      *repository.PermissionRepository
 }
 
 // NewAuthController 创建一个新的 AuthController
@@ -27,6 +29,9 @@ func NewAuthController(authService *service.AuthService, deviceService *service.
 
 // SetSessionService 依赖注入（可选）
 func (c *AuthController) SetSessionService(s *service.SessionService) { c.session = s }
+
+// SetPermissionRepository 注入权限仓库，用于查询用户权限节点
+func (c *AuthController) SetPermissionRepository(p *repository.PermissionRepository) { c.permRepo = p }
 
 // HandleAuthRequest 处理常规设备认证请求
 func (c *AuthController) HandleAuthRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
@@ -91,7 +96,21 @@ func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg 
 		s.SendErrorResponse(client, msg.ID, "invalid credentials")
 		return
 	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "token": token, "user": map[string]interface{}{"id": user.ID, "username": user.Username, "displayName": user.DisplayName}})
+	// 查询权限节点快照
+	perms := []string{}
+	if c.permRepo != nil {
+		if list, err := c.permRepo.ListByUserID(user.ID); err == nil {
+			for _, p := range list {
+				perms = append(perms, p.Node)
+			}
+		}
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{
+		"success":     true,
+		"token":       token,
+		"user":        map[string]interface{}{"id": user.ID, "username": user.Username, "displayName": user.DisplayName},
+		"permissions": perms,
+	})
 }
 
 // HandleRegisterRequest 处理设备注册请求

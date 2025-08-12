@@ -55,6 +55,16 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 	variableHandler := handlers.NewVariableHandler(api.hubClient)
 	userHandler := handlers.NewUserHandler(api.hubClient)
 
+	// 简单鉴权：除登录外的接口都需要 Authorization: Bearer <token>
+	if path != "auth/login" {
+		authz := r.Header.Get("Authorization")
+		if authz == "" {
+			api.writeError(w, http.StatusUnauthorized, "Unauthorized")
+			return
+		}
+		// 这里暂不校验 token 合法性，仅要求存在；后续可与后端校验结合
+	}
+
 	switch {
 	// 登录
 	case path == "auth/login" && r.Method == "POST":

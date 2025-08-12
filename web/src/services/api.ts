@@ -1,4 +1,5 @@
 import type { ApiResponse, DeviceTreeNode, DeviceVariable } from '@/types/api'
+import type { User } from '@/types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090/api'
 
@@ -122,6 +123,23 @@ class ApiService {
   // 调试：获取数据库信息
   async getDebugInfo(): Promise<ApiResponse> {
     return this.request('/debug/db')
+  }
+
+  // ===== 用户管理 =====
+  async getUsers(): Promise<ApiResponse<User[]>> {
+    return this.request<User[]>('/users', { method: 'GET' })
+  }
+
+  async createUser(data: { username: string; displayName?: string; password: string }): Promise<ApiResponse<User>> {
+    return this.request<User>('/users', { method: 'POST', body: JSON.stringify(data) })
+  }
+
+  async updateUser(data: { id: number; displayName?: string; disabled?: boolean; password?: string }): Promise<ApiResponse> {
+    return this.request('/users', { method: 'PUT', body: JSON.stringify(data) })
+  }
+
+  async deleteUser(id: number): Promise<ApiResponse> {
+    return this.request('/users', { method: 'DELETE', body: JSON.stringify({ id }) })
   }
 }
 
