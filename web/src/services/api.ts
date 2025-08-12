@@ -90,13 +90,6 @@ class ApiService {
   }
 
   // 变量管理CRUD操作
-  async createVariable(data: { name: string; value: any; deviceId: number }): Promise<ApiResponse> {
-    return this.request('/variables', {
-      method: 'POST',
-      body: JSON.stringify(data)
-    })
-  }
-
   async updateVariableNew(data: { [key: string]: any }): Promise<ApiResponse> {
     return this.request('/variables', {
       method: 'PUT',

@@ -48,7 +48,7 @@ func (h *VariableHandler) HandleGetVariables(w http.ResponseWriter, r *http.Requ
 
 // HandleCreateVariable 处理创建变量
 func (h *VariableHandler) HandleCreateVariable(w http.ResponseWriter, r *http.Request) {
-	h.writeError(w, http.StatusNotImplemented, "Create variable not implemented")
+	h.HandleUpdateVariable(w, r)
 }
 
 // HandleUpdateVariable 处理更新变量

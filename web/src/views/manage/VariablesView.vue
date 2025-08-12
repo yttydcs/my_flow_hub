@@ -255,11 +255,16 @@ const refreshData = async () => {
 // 添加变量
 const handleAddVariable = async () => {
   try {
-    const response = await apiService.createVariable({
-      name: newVariable.value.name,
-      value: newVariable.value.value,
-      deviceId: parseInt(newVariable.value.deviceId)
-    })
+    const device = hubStore.devices.find(d => d.ID.toString() === newVariable.value.deviceId)
+    if (!device) {
+      message.error('未找到设备')
+      return
+    }
+    const fqdn = `[${device.DeviceUID}].${newVariable.value.name}`
+    const payload = {
+      [fqdn]: newVariable.value.value
+    }
+    const response = await apiService.updateVariableNew(payload)
     
     if (response.success) {
       message.success('变量添加成功')
