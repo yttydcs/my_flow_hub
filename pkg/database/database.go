@@ -55,15 +55,15 @@ func InitDatabase(dsn, postgresDsn, dbName string) {
 
 	log.Info().Msg("数据库连接成功")
 
-	// 仅在数据库首次创建时运行自动迁移
+	// 每次启动都运行自动迁移，确保新模型就绪
+	log.Info().Msg("正在运行数据库迁移...")
+	err = DB.AutoMigrate(&Device{}, &DeviceVariable{}, &AccessPermission{}, &User{}, &Permission{}, &Key{}, &Grant{}, &AuditLog{})
+	if err != nil {
+		log.Fatal().Err(err).Msg("数据库迁移失败")
+	}
 	if wasCreated {
-		log.Info().Msg("正在运行数据库迁移...")
-		err = DB.AutoMigrate(&Device{}, &DeviceVariable{}, &AccessPermission{})
-		if err != nil {
-			log.Fatal().Err(err).Msg("数据库迁移失败")
-		}
-		log.Info().Msg("数据库迁移完成")
+		log.Info().Msg("数据库首次创建并迁移完成")
 	} else {
-		log.Info().Msg("跳过数据库迁移，因为数据库已存在")
+		log.Info().Msg("数据库迁移完成（已存在数据库）")
 	}
 }

@@ -6,6 +6,12 @@ console.log('API_BASE_URL:', API_BASE_URL)
 console.log('Environment variables:', import.meta.env)
 
 class ApiService {
+  private token: string | null = null
+
+  setToken(t: string | null) {
+    this.token = t
+  }
+
   private async request<T>(endpoint: string, options?: RequestInit): Promise<ApiResponse<T>> {
     const url = `${API_BASE_URL}${endpoint}`
     
@@ -13,6 +19,7 @@ class ApiService {
       const response = await fetch(url, {
         headers: {
           'Content-Type': 'application/json',
+          ...(this.token ? { 'Authorization': `Bearer ${this.token}` } : {}),
           ...options?.headers,
         },
         ...options,
@@ -27,6 +34,14 @@ class ApiService {
       console.error(`API request failed: ${url}`, error)
       throw error
     }
+  }
+
+  // 登录
+  async login(username: string, password: string): Promise<ApiResponse<{ token: string }>> {
+    return this.request<{ token: string }>(`/auth/login`, {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    })
   }
 
   // 获取设备树

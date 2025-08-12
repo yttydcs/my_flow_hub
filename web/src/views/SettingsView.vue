@@ -1,20 +1,22 @@
 <template>
   <div style="max-width: 800px; margin: 0 auto;">
-    <n-h2>系统设置</n-h2>
+    <n-h2 style="margin-bottom: 12px;">系统设置</n-h2>
+
     
-    <!-- 系统设置列表 -->
+
+    <!-- 设置入口列表 -->
     <n-card>
-      <n-list clickable>
+      <n-list>
         <!-- 连接设置 -->
         <n-list-item @click="showConnectionModal = true">
           <template #prefix>
-            <n-icon size="20" color="#18a058">
+            <n-icon size="20" color="#52c41a">
               <LinkIcon />
             </n-icon>
           </template>
           <n-thing>
             <template #header>连接设置</template>
-            <template #description>配置API和WebSocket连接地址</template>
+            <template #description>API 与 WebSocket 地址</template>
           </n-thing>
           <template #suffix>
             <n-icon size="16" color="#999">
@@ -172,13 +174,14 @@
       <n-descriptions label-placement="left" :column="1" bordered>
         <n-descriptions-item label="应用版本">1.0.0</n-descriptions-item>
         <n-descriptions-item label="构建时间">{{ new Date().toLocaleDateString() }}</n-descriptions-item>
-        <n-descriptions-item label="运行环境">{{ import.meta.env.MODE }}</n-descriptions-item>
+  <n-descriptions-item label="运行环境">{{ buildMode }}</n-descriptions-item>
       </n-descriptions>
       <template #action>
         <n-button @click="showSystemInfoModal = false">关闭</n-button>
       </template>
     </n-modal>
   </div>
+  
 </template>
 
 <script setup lang="ts">
@@ -249,6 +252,11 @@ const saveThemeSettings = () => {
   message.success('界面设置已保存')
   showThemeModal.value = false
 }
+
+// 无登录逻辑
+
+// 构建信息
+const buildMode = import.meta.env.MODE
 </script>
 
 <style scoped>

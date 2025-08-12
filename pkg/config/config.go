@@ -20,6 +20,10 @@ type Config struct {
 		ListenAddr   string `json:"ListenAddr"`
 		HardwareID   string `json:"HardwareID"`
 		ManagerToken string `json:"ManagerToken"`
+		DefaultAdmin struct {
+			Username string `json:"Username"`
+			Password string `json:"Password"`
+		} `json:"DefaultAdmin"`
 	} `json:"Server"`
 	Hub struct {
 		Address string `json:"Address"`

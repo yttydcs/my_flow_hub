@@ -9,7 +9,11 @@
   "Server": {
     "ListenAddr": ":8080",
     "HardwareID": "hub-001",
-    "ManagerToken": "a-super-secret-manager-token"
+    "ManagerToken": "a-super-secret-manager-token",
+    "DefaultAdmin": {
+      "Username": "admin",
+      "Password": "admin123!"
+    }
   },
   "Relay": {
     "Enabled": false,

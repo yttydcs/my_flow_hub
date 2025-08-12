@@ -14,8 +14,8 @@
       </div>
       
       <!-- 右侧导航和用户信息 -->
-      <n-space size="large">
-        <n-button-group>
+    <n-space size="large" v-if="isLoggedIn">
+  <n-button-group>
           <n-button 
             :type="$route.name === 'dashboard' ? 'primary' : 'default'"
             @click="$router.push('/')"
@@ -25,7 +25,7 @@
             </template>
             主页
           </n-button>
-          <n-button 
+          <n-button v-if="isAdmin"
             :type="$route.name?.toString().startsWith('manage') ? 'primary' : 'default'"
             @click="$router.push('/manage/devices')"
           >
@@ -46,13 +46,13 @@
         </n-button-group>
         
         <!-- 当前用户占位 -->
-        <n-dropdown trigger="hover" :options="userMenuOptions" @select="handleUserMenuSelect">
+  <n-dropdown trigger="hover" :options="userMenuOptions" @select="handleUserMenuSelect">
           <n-button circle quaternary>
             <template #icon>
               <n-icon size="20"><PersonIcon /></n-icon>
             </template>
           </n-button>
-        </n-dropdown>
+  </n-dropdown>
       </n-space>
     </n-layout-header>
 
@@ -79,8 +79,12 @@ import {
   LogOut as LogOutIcon,
   Person as ProfileIcon
 } from '@vicons/ionicons5'
+import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
+const auth = useAuthStore()
+const isLoggedIn = computed(() => auth.isLoggedIn)
+const isAdmin = computed(() => auth.isAdmin)
 
 // 用户菜单选项
 const userMenuOptions = [
@@ -109,6 +113,8 @@ const handleUserMenuSelect = (key: string) => {
       break
   }
 }
+
+function goLogin() {}
 </script>
 
 <style scoped>

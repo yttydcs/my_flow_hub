@@ -53,8 +53,12 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 
 	deviceHandler := handlers.NewDeviceHandler(api.hubClient)
 	variableHandler := handlers.NewVariableHandler(api.hubClient)
+	userHandler := handlers.NewUserHandler(api.hubClient)
 
 	switch {
+	// 登录
+	case path == "auth/login" && r.Method == "POST":
+		api.handleLogin(w, r)
 	// 设备相关路由
 	case path == "nodes" && r.Method == "GET":
 		deviceHandler.HandleGetDevices(w, r)
@@ -80,6 +84,15 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 		api.handleSendMessage(w, r)
 	case path == "debug/db" && r.Method == "GET":
 		api.handleDebugDB(w, r)
+	// 用户相关（仅管理员）
+	case path == "users" && r.Method == "GET":
+		userHandler.HandleListUsers(w, r)
+	case path == "users" && r.Method == "POST":
+		userHandler.HandleCreateUser(w, r)
+	case path == "users" && r.Method == "PUT":
+		userHandler.HandleUpdateUser(w, r)
+	case path == "users" && r.Method == "DELETE":
+		userHandler.HandleDeleteUser(w, r)
 	default:
 		api.writeError(w, http.StatusNotFound, "API endpoint not found")
 	}
@@ -132,6 +145,31 @@ func (api *ManagerAPI) handleSendMessage(w http.ResponseWriter, r *http.Request)
 			"message": "Message sent, no response received",
 		})
 	}
+}
+
+// handleLogin 将登录请求转发为 hub 的 user_login 消息
+func (api *ManagerAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if !api.hubClient.IsConnected() {
+		api.writeError(w, http.StatusServiceUnavailable, "Not connected to hub")
+		return
+	}
+
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		api.writeError(w, http.StatusBadRequest, "Invalid body")
+		return
+	}
+
+	msg := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_login", Payload: creds, Timestamp: time.Now()}
+	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
+	if err != nil {
+		api.writeError(w, http.StatusUnauthorized, "login failed")
+		return
+	}
+	api.writeJSON(w, resp.Payload)
 }
 
 // handleDebugDB 调试数据库连接和表结构

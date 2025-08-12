@@ -13,6 +13,8 @@ import (
 type AuthController struct {
 	authService   *service.AuthService
 	deviceService *service.DeviceService
+	session       *service.SessionService
+	perm          *service.PermissionService
 }
 
 // NewAuthController 创建一个新的 AuthController
@@ -22,6 +24,9 @@ func NewAuthController(authService *service.AuthService, deviceService *service.
 		deviceService: deviceService,
 	}
 }
+
+// SetSessionService 依赖注入（可选）
+func (c *AuthController) SetSessionService(s *service.SessionService) { c.session = s }
 
 // HandleAuthRequest 处理常规设备认证请求
 func (c *AuthController) HandleAuthRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
@@ -67,6 +72,26 @@ func (c *AuthController) HandleManagerAuthRequest(s *hub.Server, client *hub.Cli
 		"deviceId": device.DeviceUID,
 		"role":     "manager",
 	})
+}
+
+// HandleUserLogin 处理用户登录，返回临时令牌（最小实现）
+func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	var payload struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	b, _ := json.Marshal(msg.Payload)
+	json.Unmarshal(b, &payload)
+	if c.session == nil {
+		s.SendErrorResponse(client, msg.ID, "login not configured")
+		return
+	}
+	token, user, ok := c.session.Login(payload.Username, payload.Password)
+	if !ok {
+		s.SendErrorResponse(client, msg.ID, "invalid credentials")
+		return
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "token": token, "user": map[string]interface{}{"id": user.ID, "username": user.Username, "displayName": user.DisplayName}})
 }
 
 // HandleRegisterRequest 处理设备注册请求

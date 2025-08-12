@@ -11,15 +11,25 @@ import (
 // DeviceController 负责处理设备相关的消息
 type DeviceController struct {
 	service *service.DeviceService
+	perm    *service.PermissionService
 }
 
 // NewDeviceController 创建一个新的 DeviceController
-func NewDeviceController(service *service.DeviceService) *DeviceController {
-	return &DeviceController{service: service}
+func NewDeviceController(service *service.DeviceService, perm *service.PermissionService) *DeviceController {
+	return &DeviceController{service: service, perm: perm}
 }
 
 // HandleQueryNodes 处理节点查询请求
 func (c *DeviceController) HandleQueryNodes(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	// 非管理员仅允许查询自身（最小实现：返回空或未来返回拥有权设备）
+	if !c.perm.CanAccessAllDevices(client.DeviceID) {
+		s.SendResponse(client, msg.ID, map[string]interface{}{
+			"success": true,
+			"data":    []database.Device{},
+		})
+		return
+	}
+
 	devices, err := c.service.GetAllDevices()
 	if err != nil {
 		s.SendErrorResponse(client, msg.ID, "Failed to query nodes")
@@ -41,6 +51,11 @@ func (c *DeviceController) HandleCreateDevice(s *hub.Server, client *hub.Client,
 	jsonPayload, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(jsonPayload, &payload)
 
+	if !c.perm.CanManageDevice(client.DeviceID, payload.DeviceUID) {
+		s.SendErrorResponse(client, msg.ID, "permission denied")
+		return
+	}
+
 	if err := c.service.CreateDevice(&payload); err != nil {
 		s.SendErrorResponse(client, msg.ID, "Failed to create device")
 		return
@@ -53,6 +68,11 @@ func (c *DeviceController) HandleUpdateDevice(s *hub.Server, client *hub.Client,
 	var payload database.Device
 	jsonPayload, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(jsonPayload, &payload)
+
+	if !c.perm.CanManageDevice(client.DeviceID, payload.DeviceUID) {
+		s.SendErrorResponse(client, msg.ID, "permission denied")
+		return
+	}
 
 	if err := c.service.UpdateDevice(&payload); err != nil {
 		s.SendErrorResponse(client, msg.ID, "Failed to update device")
@@ -69,6 +89,11 @@ func (c *DeviceController) HandleDeleteDevice(s *hub.Server, client *hub.Client,
 	}
 	id, ok := payload["id"].(float64)
 	if !ok {
+		return
+	}
+
+	if !c.perm.IsAdminDevice(client.DeviceID) {
+		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
 

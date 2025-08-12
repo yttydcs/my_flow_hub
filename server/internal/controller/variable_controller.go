@@ -18,13 +18,15 @@ import (
 type VariableController struct {
 	service       *service.VariableService
 	deviceService *service.DeviceService
+	perm          *service.PermissionService
 }
 
 // NewVariableController 创建一个新的 VariableController
-func NewVariableController(service *service.VariableService, deviceService *service.DeviceService) *VariableController {
+func NewVariableController(service *service.VariableService, deviceService *service.DeviceService, perm *service.PermissionService) *VariableController {
 	return &VariableController{
 		service:       service,
 		deviceService: deviceService,
+		perm:          perm,
 	}
 }
 
@@ -80,6 +82,10 @@ func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Cli
 			s.SendErrorResponse(client, msg.ID, "Invalid deviceId")
 			return
 		}
+		if !c.perm.CanReadVarsForDevice(client.DeviceID, deviceID) {
+			s.SendErrorResponse(client, msg.ID, "permission denied")
+			return
+		}
 		device, err := c.deviceService.GetDeviceByUID(deviceID)
 		if err != nil {
 			s.SendErrorResponse(client, msg.ID, "Device not found")
@@ -96,6 +102,10 @@ func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Cli
 		})
 	} else {
 		// 查询所有变量
+		if !c.perm.IsAdminDevice(client.DeviceID) {
+			s.SendErrorResponse(client, msg.ID, "permission denied")
+			return
+		}
 		variables, err := c.service.GetAllVariables()
 		if err != nil {
 			s.SendErrorResponse(client, msg.ID, "Failed to get all variables")
@@ -138,6 +148,10 @@ func (c *VariableController) HandleVarDelete(s *hub.Server, client *hub.Client, 
 			continue
 		}
 
+		if !c.perm.CanWriteVarsForDevice(client.DeviceID, targetDevice.DeviceUID) {
+			continue
+		}
+
 		if c.service.DeleteVariable(targetDevice.ID, varName) == nil {
 			deletedCount++
 		}
@@ -176,6 +190,10 @@ func (c *VariableController) HandleVarUpdate(s *hub.Server, client *hub.Client, 
 
 		targetDevice, err := c.deviceService.GetDeviceByUIDOrName(deviceIdentifier)
 		if err != nil {
+			continue
+		}
+
+		if !c.perm.CanWriteVarsForDevice(client.DeviceID, targetDevice.DeviceUID) {
 			continue
 		}
 

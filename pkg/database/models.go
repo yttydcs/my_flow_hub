@@ -31,6 +31,7 @@ type Device struct {
 	Parent        *Device  `gorm:"foreignKey:ParentID"`
 	Children      []Device `gorm:"foreignKey:ParentID"`
 	Name          string
+	OwnerUserID   *uint64 // 设备所有者用户ID，可为空（无主）
 	LastSeen      *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -57,4 +58,66 @@ type AccessPermission struct {
 	TargetVariableName string
 	Action             PermissionAction `gorm:"type:varchar(20)"`
 	CreatedAt          time.Time
+}
+
+// User 用户表
+type User struct {
+	ID           uint64 `gorm:"primaryKey"`
+	Username     string `gorm:"uniqueIndex;size:100;not null"`
+	PasswordHash string `gorm:"not null"`
+	DisplayName  string `gorm:"size:200"`
+	Disabled     bool   `gorm:"default:false"`
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// Permission 允许型权限节点（无显式拒绝）
+type Permission struct {
+	ID          uint64 `gorm:"primaryKey"`
+	SubjectType string `gorm:"size:20;index:idx_perm_subject"` // user/device/key
+	SubjectID   uint64 `gorm:"index:idx_perm_subject"`
+	Node        string `gorm:"size:512;index"`
+	CreatedBy   *uint64
+	CreatedAt   time.Time
+}
+
+// Key 密钥/会话令牌
+type Key struct {
+	ID              uint64     `gorm:"primaryKey"`
+	OwnerUserID     *uint64    `gorm:"index"`         // 谁签发的
+	BindSubjectType *string    `gorm:"size:20;index"` // user/device(optional)
+	BindSubjectID   *uint64    `gorm:"index"`
+	SecretHash      string     `gorm:"not null"`
+	ExpiresAt       *time.Time `gorm:"index"`
+	MaxUses         *int
+	RemainingUses   *int
+	Revoked         bool `gorm:"index"`
+	IssuedBy        *uint64
+	IssuedAt        time.Time
+	Meta            datatypes.JSON
+}
+
+// Grant 用户->用户的借用授权（可选）
+type Grant struct {
+	ID            uint64         `gorm:"primaryKey"`
+	GrantorUserID uint64         `gorm:"index"`
+	GranteeUserID uint64         `gorm:"index"`
+	ScopeNodes    datatypes.JSON // 节点数组
+	ExpiresAt     *time.Time     `gorm:"index"`
+	Revoked       bool           `gorm:"index"`
+	CreatedAt     time.Time
+}
+
+// AuditLog 审计日志
+type AuditLog struct {
+	ID          uint64 `gorm:"primaryKey"`
+	SubjectType string `gorm:"size:20"`
+	SubjectID   *uint64
+	Action      string    `gorm:"size:100"`
+	Resource    string    `gorm:"size:512"`
+	Decision    string    `gorm:"size:20"`
+	IP          string    `gorm:"size:64"`
+	UA          string    `gorm:"size:256"`
+	At          time.Time `gorm:"index"`
+	Extra       datatypes.JSON
 }

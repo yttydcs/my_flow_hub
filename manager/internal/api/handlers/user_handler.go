@@ -1,0 +1,85 @@
+package handlers
+
+import (
+	"encoding/json"
+	"myflowhub/manager/internal/client"
+	"myflowhub/pkg/protocol"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+type UserHandler struct{ hubClient *client.HubClient }
+
+func NewUserHandler(hc *client.HubClient) *UserHandler { return &UserHandler{hubClient: hc} }
+
+func (h *UserHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_list"}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+func (h *UserHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
+	var body struct{ Username, DisplayName, Password string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_create", Payload: body}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+func (h *UserHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID          uint64
+		DisplayName *string
+		Password    *string
+		Disabled    *bool
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_update", Payload: body}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+func (h *UserHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
+	var body struct{ ID uint64 }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_delete", Payload: body}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+func (h *UserHandler) writeJSON(w http.ResponseWriter, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(data)
+}
+func (h *UserHandler) writeError(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": msg})
+}
