@@ -68,14 +68,14 @@ class ApiService {
   }
 
   // 设备管理CRUD操作
-  async createDevice(data: { hardwareId: string; name: string; role: string; parentId?: number }): Promise<ApiResponse> {
+  async createDevice(data: { HardwareID: string; Name: string; Role: string; ParentID?: number | null }): Promise<ApiResponse> {
     return this.request('/nodes', {
       method: 'POST',
       body: JSON.stringify(data)
     })
   }
 
-  async updateDevice(data: { id: number; name: string; role: string; parentId?: number }): Promise<ApiResponse> {
+  async updateDevice(data: { ID: number; HardwareID: string; Name: string; Role: string; ParentID?: number | null }): Promise<ApiResponse> {
     return this.request('/nodes', {
       method: 'PUT',
       body: JSON.stringify(data)

@@ -34,7 +34,7 @@ func main() {
 	variableRepo := repository.NewVariableRepository(database.DB)
 
 	// 初始化 service
-	deviceService := service.NewDeviceService(deviceRepo)
+	deviceService := service.NewDeviceService(deviceRepo, variableRepo, database.DB)
 	variableService := service.NewVariableService(variableRepo)
 	authService := service.NewAuthService(deviceRepo, variableRepo)
 
@@ -59,6 +59,9 @@ func main() {
 
 	// 注册路由
 	server.RegisterRoute("query_nodes", deviceController.HandleQueryNodes)
+	server.RegisterRoute("create_device", deviceController.HandleCreateDevice)
+	server.RegisterRoute("update_device", deviceController.HandleUpdateDevice)
+	server.RegisterRoute("delete_device", deviceController.HandleDeleteDevice)
 	server.RegisterRoute("query_variables", variableController.HandleQueryVariables)
 	server.RegisterRoute("vars_query", variableController.HandleVarsQuery)
 	server.RegisterRoute("var_update", variableController.HandleVarUpdate)

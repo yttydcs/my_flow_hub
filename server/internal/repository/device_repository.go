@@ -52,3 +52,13 @@ func (r *DeviceRepository) Create(device *database.Device) error {
 func (r *DeviceRepository) UpdateParentID(deviceID, parentID uint64) error {
 	return r.db.Model(&database.Device{}).Where("id = ?", deviceID).Update("parent_id", parentID).Error
 }
+
+// Update 更新设备信息
+func (r *DeviceRepository) Update(device *database.Device) error {
+	return r.db.Save(device).Error
+}
+
+// Delete 删除设备
+func (r *DeviceRepository) Delete(id uint64) error {
+	return r.db.Delete(&database.Device{}, id).Error
+}

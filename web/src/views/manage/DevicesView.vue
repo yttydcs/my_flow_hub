@@ -294,10 +294,10 @@ const refreshData = async () => {
 const handleAddDevice = async () => {
   try {
     const response = await apiService.createDevice({
-      hardwareId: newDevice.value.hardwareId,
-      name: newDevice.value.name,
-      role: newDevice.value.role,
-      parentId: newDevice.value.parentId || undefined
+      HardwareID: newDevice.value.hardwareId,
+      Name: newDevice.value.name,
+      Role: newDevice.value.role,
+      ParentID: newDevice.value.parentId
     })
     
     if (response.success) {
@@ -337,10 +337,11 @@ const handleEditDevice = (device: any) => {
 const handleUpdateDevice = async () => {
   try {
     const response = await apiService.updateDevice({
-      id: editDevice.value.id,
-      name: editDevice.value.name,
-      role: editDevice.value.role,
-      parentId: editDevice.value.parentId || undefined
+      ID: editDevice.value.id,
+      HardwareID: editDevice.value.hardwareId,
+      Name: editDevice.value.name,
+      Role: editDevice.value.role,
+      ParentID: editDevice.value.parentId
     })
     
     if (response.success) {
