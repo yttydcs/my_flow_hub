@@ -33,7 +33,7 @@
             </div>
             <div>
                 <label for="device-id">My Device ID (from server):</label>
-                <input type="text" id="device-id" readonly>
+                <input type="text" id="device-id">
             </div>
              <div>
                 <label for="target-id">Target Device ID (for msg_send):</label>
@@ -125,14 +125,20 @@
                 log('Connected to server.', 'system');
                 connectBtn.textContent = 'Disconnect';
 
+                const specifiedId = deviceIdInput.value;
                 const storedId = localStorage.getItem(hardwareIdInput.value + '_deviceId');
                 const storedSecret = localStorage.getItem(hardwareIdInput.value + '_secretKey');
 
-                if (storedId && storedSecret) {
+                if (specifiedId) {
+                    log(`Using specified Device ID: ${specifiedId}`, 'system');
+                    const authPayload = { deviceId: parseInt(specifiedId, 10), secretKey: storedSecret || 'default-secret' };
+                    sendMessage("auth_request", authPayload);
+                    setButtonsDisabled(false);
+                } else if (storedId && storedSecret) {
                     log(`Found stored credentials. Authenticating as Device ID: ${storedId}`, 'system');
+                    deviceIdInput.value = storedId;
                     const authPayload = { deviceId: parseInt(storedId, 10), secretKey: storedSecret };
                     sendMessage("auth_request", authPayload);
-                    deviceIdInput.value = storedId;
                     setButtonsDisabled(false);
                 } else {
                     log('No stored credentials. Registering as a new device...', 'system');
@@ -149,11 +155,14 @@
                     const newId = msg.payload.deviceId;
                     const newSecret = msg.payload.secretKey;
                     
-                    localStorage.setItem(hardwareIdInput.value + '_deviceId', newId);
+                    localStorage.setItem(hardwareIdInput.value + '_deviceId', newId.toString());
                     localStorage.setItem(hardwareIdInput.value + '_secretKey', newSecret);
 
-                    deviceIdInput.value = newId;
+                    deviceIdInput.value = newId.toString();
                     log(`Registration successful! Stored Device ID: ${newId}. You can now send messages.`, 'system');
+                    setButtonsDisabled(false);
+                } else if (msg.type === 'auth_response' && msg.payload.success) {
+                    log('Authentication successful!', 'system');
                     setButtonsDisabled(false);
                 } else if (msg.type === 'response' && msg.payload.original_id) {
                     log(`Received response for request ${msg.payload.original_id}`, 'system');
