@@ -28,7 +28,7 @@
         <div class="actions">
           <n-button type="primary" :loading="savingPwd" @click="changePassword">更新密码</n-button>
         </div>
-        <div class="tip">注意：当前后端不校验旧密码，管理员也可通过相同接口为他人重置密码。</div>
+        
       </n-form>
     </n-card>
   </div>
