@@ -4,8 +4,9 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 
 ## 基础信息
 
-- **服务地址**: `http://localhost:8090`
-- **所有API路径前缀**: `/api/`
+- 服务地址: `http://localhost:8090`
+- 所有 API 路径前缀: `/api/`
+- 鉴权: 除 `/api/auth/login` 外，其余接口都需要请求头 `Authorization: Bearer <token>`。
 
 ## API 端点
 
@@ -29,7 +30,7 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 
 获取系统中的所有设备节点信息。
 
-#### 创建设备
+#### 创建设备（管理员或具备对应权限）
 
 **POST** `/api/nodes`
 
@@ -45,7 +46,7 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
-#### 更新设备
+#### 更新设备（管理员或具备对应权限）
 
 **PUT** `/api/nodes`
 
@@ -60,7 +61,7 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
-#### 删除设备
+#### 删除设备（管理员或具备对应权限）
 
 **DELETE** `/api/nodes`
 
@@ -73,7 +74,7 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
-### 4. 变量管理
+### 4. 变量管理（管理员或具备对应权限）
 
 #### 获取变量
 
@@ -148,7 +149,7 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
-### 5. 发送管理指令
+### 5. 发送管理指令（管理员或具备对应权限）
 
 **POST** `/api/message`
 
@@ -185,6 +186,47 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
+### 6. 用户管理（仅管理员）
+
+#### 列出用户
+
+GET `/api/users`
+
+#### 新建用户
+
+POST `/api/users`
+
+请求体：
+```json
+{ "username": "bob", "displayName": "Bob", "password": "pass" }
+```
+
+#### 更新用户
+
+PUT `/api/users`
+
+请求体：
+```json
+{ "id": 2, "displayName": "Bobby", "disabled": false, "password": "newpass" }
+```
+
+#### 删除用户
+
+DELETE `/api/users`
+
+请求体：
+```json
+{ "id": 2 }
+```
+
+### 7. 用户权限管理（仅管理员）
+
+POST `/api/users/perms/list`  请求体：`{ "userId": 2 }`
+
+POST `/api/users/perms/add`   请求体：`{ "userId": 2, "node": "admin.manage" }`
+
+POST `/api/users/perms/remove` 请求体：`{ "userId": 2, "node": "var.read.**" }`
+
 ## 错误响应
 
 所有API在发生错误时都会返回统一的错误格式：
@@ -213,25 +255,29 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 
 ## 使用示例
 
-### 使用 curl 获取所有节点：
+### 登录并获取所有节点：
 
 ```bash
-curl -X GET http://localhost:8090/api/nodes
+# 登录
+TOKEN=$(curl -s -X POST http://localhost:8090/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123!"}')
+
+# 获取所有节点
+curl -H "Authorization: Bearer $TOKEN" -X GET http://localhost:8090/api/nodes
 ```
 
-### 使用 curl 更新变量：
+### 更新变量：
 
 ```bash
 curl -X POST http://localhost:8090/api/variables \
-  -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
   -d '{"variables": {"temperature": 25.5, "status": "active"}}'
 ```
 
-### 使用 curl 发送管理指令：
+### 发送管理指令：
 
 ```bash
 curl -X POST http://localhost:8090/api/message \
-  -H "Content-Type: application/json" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
   -d '{
     "target": 10002,
     "type": "msg_send",

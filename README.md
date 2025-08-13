@@ -40,7 +40,7 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | Web GUI 调试客户端 | ✅ 已实现 | `web-client/` 目录下的独立HTML文件。 |
 | **其他** | | |
 | 外部化配置 | ✅ 已实现 | 所有关键配置均在 `config.json` 中。 |
-| 权限管理 | ❌ 未实现 | 当前默认允许所有操作。 |
+| 权限管理 | ✅ 已实现 | 基于权限节点与通配符，管理员需 admin.manage；支持用户权限编辑与快照下发。 |
 | 二进制协议支持 | ❌ 未实现 | 当前使用JSON，未来可优化。 |
 
 ## 项目结构
@@ -66,38 +66,52 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 
 ## 如何运行
 
-1.  **配置**:
-    *   打开 `server/config.json`，在 `Database` 部分，将 `Password` 修改为您本地 PostgreSQL 的真实密码。
-    *   打开 `manager/config.json`，设置正确的 `ManagerToken`。
-    *   （可选）在 `server/config.json` 的 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
-2.  **启动核心服务**:
-    ```bash
-    cd server
-    go run ./cmd/myflowhub
+1.  配置
+    - 打开 `server/config.json`，在 `Database` 部分配置本地 PostgreSQL；可设置 `Server.DefaultAdmin`（见下文“默认管理员与首启规则”）。
+    - 打开 `manager/config.json`，设置正确的 `ManagerToken`。
+    - （可选）在 `server/config.json` 的 `Relay` 部分，将 `Enabled` 设置为 `true` 来启动一个中继实例。
+2.  启动核心服务（PowerShell）
+    ```powershell
+    cd d:\rj\MyFlowHub\server
+    go run .\cmd\myflowhub
     ```
-3.  **启动管理后台服务**:
-    *   打开一个新的终端。
-    ```bash
-    cd manager
-    go run ./cmd/manager
+3.  启动管理后台服务（PowerShell）
+    ```powershell
+    cd d:\rj\MyFlowHub\manager
+    go run .\cmd\manager
     ```
-4.  **开发前端**:
-    *   打开一个新的终端。
-    ```bash
-    cd web
+4.  开发前端（PowerShell）
+    - 前端需要 Node 20.19+ 或 22.12+；首次安装依赖后再启动。
+    ```powershell
+    cd d:\rj\MyFlowHub\web
     npm install
     npm run dev
     ```
-5.  **访问**:
+5.  访问
     *   **核心服务WebSocket**: `ws://localhost:8080/ws`
     *   **管理API服务**: `http://localhost:8090/api/`
-    *   **管理后台前端**: `http://localhost:5173` (Vite 开发服务器)
+    *   **管理后台前端**: `http://localhost:5173`（Vite 开发服务器）
     *   **调试客户端**: 打开 `web-client/index.html`
+
+## 权限与认证（重要）
+
+- 管理 API 除 `/api/auth/login` 外，均需携带 `Authorization: Bearer <token>` 请求头。
+- 登录接口会返回 token、user、permissions（权限节点快照）；前端将 token 保存在状态中并自动添加到后续请求头。
+- 前端路由已配置登录守卫：未登录只能访问 `/login`；仅拥有 `admin.manage` 的用户可访问“用户管理”等管理员页面。
+- 权限节点及匹配语义详见《权限系统设计文档》（`权限设计.md`）。
+
+## 默认管理员与首启规则
+
+- 首次创建数据库或首次创建 `users` 表时，系统会：
+  1) 自动创建默认管理员账户（用户名取自 `Server.DefaultAdmin.Username`，默认为 `admin`）。
+  2) 为该账户授予 `admin.manage` 与 `**` 两个权限节点。
+- 如果在启动时检测到用户表已存在，则不会自动创建 admin，也不会自动赋予任何权限（完全跳过）。
+- 建议在首次登录后修改默认管理员密码。
 
 ## 下一步计划
 
-1.  **完善前端界面**: 在 `web` 项目中，使用 Naive UI 组件构建完整的管理界面，集成 Manager API。
-2.  **实现权限系统**: 基于 `access_permissions` 表，为变量的读写和消息的发送实现完整的权限检查逻辑。
+1.  **完善前端界面**: 持续完善设备树与变量管理视图，增强交互与状态提示。
+2.  **权限系统增强**: 引入密钥/借权机制的完整流程（签发、撤销、限次/到期、设备安装密钥）。
 3.  **增强管理功能**: 
     - 实时监控节点状态
     - 批量操作支持
