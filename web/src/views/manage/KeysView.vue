@@ -15,23 +15,23 @@
         <n-form-item label="绑定类型">
           <n-select v-model:value="form.bindType" :options="bindTypeOptions" placeholder="可选：不绑定/用户/设备" />
         </n-form-item>
-        <n-form-item label="绑定ID" v-if="form.bindType">
-          <n-input-number v-model:value="form.bindId" placeholder="对应的用户或设备ID" />
-        </n-form-item>
-        <n-form-item label="密钥内容">
-          <n-input v-model:value="form.secret" placeholder="密钥明文（演示用途）" />
+        <n-form-item label="绑定对象" v-if="form.bindType === 'device'">
+          <n-select v-model:value="form.bindId" :options="deviceOptions" placeholder="选择设备（按权限过滤）" />
         </n-form-item>
         <n-form-item label="到期时间">
-          <n-input v-model:value="form.expiresAt" placeholder="ISO 时间，如 2025-12-31T23:59:59Z（可空）" />
+          <n-date-picker v-model:value="form.expiresAtTs" type="datetime" clearable placeholder="可空" />
         </n-form-item>
         <n-form-item label="最大使用次数">
           <n-input-number v-model:value="form.maxUses" placeholder="可空" />
         </n-form-item>
+        <n-alert v-if="createdSecret" type="success" title="新密钥已生成">
+          请妥善保存：{{ createdSecret }}
+        </n-alert>
       </n-form>
       <template #action>
         <n-space>
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="saveKey">保存</n-button>
+          <n-button @click="showEdit = false">关闭</n-button>
+          <n-button v-if="!createdSecret" type="primary" :loading="saving" @click="saveKey">生成</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -41,7 +41,7 @@
 <script setup lang="ts">
 import { h, onMounted, ref, reactive, computed } from 'vue'
 import { useMessage, NButton, NButtonGroup, NIcon } from 'naive-ui'
-import { NH2, NSpace, NDataTable, NModal, NForm, NFormItem, NInput, NInputNumber, NSelect } from 'naive-ui'
+import { NH2, NSpace, NDataTable, NModal, NForm, NFormItem, NInputNumber, NSelect, NDatePicker, NAlert } from 'naive-ui'
 import { apiService } from '@/services/api'
 import type { Key } from '@/types/api'
 import { Trash as TrashIcon } from '@vicons/ionicons5'
@@ -52,7 +52,9 @@ const saving = ref(false)
 const keys = ref<Key[]>([])
 
 const showEdit = ref(false)
-const form = reactive<{ bindType?: 'user'|'device'; bindId?: number; secret: string; expiresAt?: string; maxUses?: number | null }>({ secret: '' })
+const createdSecret = ref('')
+const form = reactive<{ bindType?: 'user'|'device'; bindId?: number; expiresAtTs?: number | null; maxUses?: number | null }>({ expiresAtTs: null, maxUses: null })
+const deviceOptions = ref<{ label: string; value: number }[]>([])
 
 const bindTypeOptions = computed(() => ([
   { label: '不绑定', value: undefined },
@@ -91,19 +93,27 @@ async function loadKeys() {
 }
 
 function openCreate() {
+  createdSecret.value = ''
   form.bindType = undefined
   form.bindId = undefined
-  form.secret = ''
-  form.expiresAt = undefined
+  form.expiresAtTs = null
   form.maxUses = null
   showEdit.value = true
+  loadKeyDevices()
 }
 
 async function saveKey() {
   saving.value = true
   try {
-    const res = await apiService.createKey({ bindType: form.bindType, bindId: form.bindId, secret: form.secret, expiresAt: form.expiresAt, maxUses: form.maxUses ?? undefined })
-    if (res.success) { message.success('已创建'); showEdit.value = false; loadKeys() } else message.error(res.message || '创建失败')
+    const expiresAt = form.expiresAtTs ? new Date(form.expiresAtTs).toISOString() : undefined
+    const res = await apiService.createKey({ bindType: form.bindType, bindId: form.bindId, expiresAt, maxUses: form.maxUses ?? undefined })
+    if (res.success) {
+      // 后端随 data 返回 secret
+      // @ts-ignore
+      createdSecret.value = (res as any).secret || (res.data && (res as any).data.secret)
+      message.success('已生成新密钥')
+      loadKeys()
+    } else message.error(res.message || '创建失败')
   } catch (e) {
     message.error('网络错误')
   } finally {
@@ -121,6 +131,16 @@ async function delKey(row: Key) {
 }
 
 onMounted(loadKeys)
+
+async function loadKeyDevices() {
+  try {
+    const res = await apiService.getKeyDevices()
+    if (res.success) {
+      const list = (res.data as any[]) || []
+      deviceOptions.value = list.map(d => ({ label: `${d.Name || '设备'}(#${d.DeviceUID || d.ID})`, value: d.ID }))
+    }
+  } catch {}
+}
 </script>
 
 <style scoped>

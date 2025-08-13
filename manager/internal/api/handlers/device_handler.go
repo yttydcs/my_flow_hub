@@ -25,9 +25,14 @@ func NewDeviceHandler(hubClient *client.HubClient) *DeviceHandler {
 
 // HandleGetDevices 处理获取设备列表
 func (h *DeviceHandler) HandleGetDevices(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
 	req := protocol.BaseMessage{
-		ID:   uuid.New().String(),
-		Type: "query_nodes",
+		ID:      uuid.New().String(),
+		Type:    "query_nodes",
+		Payload: map[string]interface{}{"userKey": token, "token": token},
 	}
 
 	response, err := h.hubClient.SendRequest(req, 5*time.Second)
@@ -46,6 +51,15 @@ func (h *DeviceHandler) HandleCreateDevice(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
+	if reqBody == nil {
+		reqBody = map[string]interface{}{}
+	}
+	reqBody["userKey"] = token
+	reqBody["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
@@ -67,6 +81,15 @@ func (h *DeviceHandler) HandleUpdateDevice(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
+	if reqBody == nil {
+		reqBody = map[string]interface{}{}
+	}
+	reqBody["userKey"] = token
+	reqBody["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
@@ -88,6 +111,15 @@ func (h *DeviceHandler) HandleDeleteDevice(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
+	if reqBody == nil {
+		reqBody = map[string]interface{}{}
+	}
+	reqBody["userKey"] = token
+	reqBody["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),

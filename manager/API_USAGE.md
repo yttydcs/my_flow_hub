@@ -30,11 +30,13 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 
 获取系统中的所有设备节点信息。
 
-#### 创建设备（管理员或具备对应权限）
+#### 创建设备（管理员或具备对应权限，非管理员需提供 ParentID 且拥有该父节点的控制权）
 
 **POST** `/api/nodes`
 
 创建一个新设备。
+
+说明：服务端从请求头 `Authorization: Bearer <userKey>` 中解析用户身份与权限；非管理员不得将 OwnerUserID 设为他人，未指定时默认归自己。
 
 **请求体**:
 ```json
@@ -46,7 +48,7 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 }
 ```
 
-#### 更新设备（管理员或具备对应权限）
+#### 更新设备（管理员或具备对应权限；非管理员修改 ParentID 需能控制新父节点，不得将 OwnerUserID 改为他人）
 
 **PUT** `/api/nodes`
 

@@ -43,7 +43,8 @@ func main() {
 	permService := service.NewPermissionService(deviceRepo)
 	userService := service.NewUserService(userRepo)
 	sessionService := service.NewSessionService(userRepo)
-	keyService := service.NewKeyService(keyRepo, permRepo)
+	keyService := service.NewKeyService(keyRepo, permRepo, deviceRepo)
+	authzService := service.NewAuthzService(keyService, deviceRepo, permRepo)
 
 	// 初始化 controller
 	deviceController := controller.NewDeviceController(deviceService, permService)
@@ -55,6 +56,10 @@ func main() {
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService, permRepo)
 	keyController := controller.NewKeyController(keyService, sessionService)
+	// 将统一授权服务注入设备与变量控制器
+	deviceController.SetAuthzService(authzService)
+	variableController.SetAuthzService(authzService)
+	userController.SetAuthzService(authzService)
 
 	var server *hub.Server
 
@@ -93,6 +98,8 @@ func main() {
 	server.RegisterRoute("key_create", keyController.HandleKeyCreate)
 	server.RegisterRoute("key_update", keyController.HandleKeyUpdate)
 	server.RegisterRoute("key_delete", keyController.HandleKeyDelete)
+	// 密钥创建辅助：可见设备列表
+	server.RegisterRoute("key_devices", keyController.HandleKeyDevices)
 
 	// 启动前：按策略初始化默认管理员
 	seedDefaultAdmin(userService, permRepo)

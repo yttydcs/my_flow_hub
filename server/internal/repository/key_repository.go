@@ -39,3 +39,11 @@ func (r *KeyRepository) Update(k *database.Key) error {
 func (r *KeyRepository) Delete(id uint64) error {
 	return r.db.Delete(&database.Key{}, id).Error
 }
+
+func (r *KeyRepository) FindBySecretHash(hash string) (*database.Key, error) {
+	var k database.Key
+	if err := r.db.Where("secret_hash = ? AND revoked = FALSE", hash).First(&k).Error; err != nil {
+		return nil, err
+	}
+	return &k, nil
+}

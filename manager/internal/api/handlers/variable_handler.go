@@ -26,10 +26,16 @@ func NewVariableHandler(hubClient *client.HubClient) *VariableHandler {
 // HandleGetVariables 处理获取变量列表
 func (h *VariableHandler) HandleGetVariables(w http.ResponseWriter, r *http.Request) {
 	deviceIDStr := r.URL.Query().Get("deviceId")
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
 	payload := make(map[string]interface{})
 	if deviceIDStr != "" {
 		payload["deviceId"] = deviceIDStr
 	}
+	payload["userKey"] = token
+	payload["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
@@ -58,12 +64,18 @@ func (h *VariableHandler) HandleUpdateVariable(w http.ResponseWriter, r *http.Re
 		h.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
 
 	req := protocol.BaseMessage{
 		ID:   uuid.New().String(),
 		Type: "var_update",
 		Payload: map[string]interface{}{
 			"variables": reqBody,
+			"userKey":   token,
+			"token":     token,
 		},
 	}
 
@@ -87,12 +99,18 @@ func (h *VariableHandler) HandleDeleteVariable(w http.ResponseWriter, r *http.Re
 		h.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
 
 	req := protocol.BaseMessage{
 		ID:   uuid.New().String(),
 		Type: "var_delete",
 		Payload: map[string]interface{}{
 			"variables": reqBody.Variables,
+			"userKey":   token,
+			"token":     token,
 		},
 	}
 

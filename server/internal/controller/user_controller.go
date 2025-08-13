@@ -12,17 +12,34 @@ type UserController struct {
 	users     *service.UserService
 	perm      *service.PermissionService
 	permsRepo *repository.PermissionRepository
+	authz     *service.AuthzService
 }
 
 func NewUserController(users *service.UserService, perm *service.PermissionService, permsRepo *repository.PermissionRepository) *UserController {
 	return &UserController{users: users, perm: perm, permsRepo: permsRepo}
 }
 
+// SetAuthzService 可选注入统一授权服务
+func (c *UserController) SetAuthzService(a *service.AuthzService) { c.authz = a }
+
 func (c *UserController) HandleUserList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	// 优先使用 userKey 判定是否具备 admin.manage；否则退回设备是否为管理员
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok && c.authz.HasUserPermission(uid, "admin.manage") {
+					goto LIST_OK
+				}
+				s.SendErrorResponse(client, msg.ID, "permission denied")
+				return
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+LIST_OK:
 	data, err := c.users.List()
 	if err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
@@ -32,10 +49,22 @@ func (c *UserController) HandleUserList(s *hub.Server, client *hub.Client, msg p
 }
 
 func (c *UserController) HandleUserCreate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); !(ok && c.authz.HasUserPermission(uid, "admin.manage")) {
+					s.SendErrorResponse(client, msg.ID, "permission denied")
+					return
+				}
+				goto CREATE_OK
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+CREATE_OK:
 	var payload struct{ Username, DisplayName, Password string }
 	b, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(b, &payload)
@@ -48,10 +77,22 @@ func (c *UserController) HandleUserCreate(s *hub.Server, client *hub.Client, msg
 }
 
 func (c *UserController) HandleUserUpdate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); !(ok && c.authz.HasUserPermission(uid, "admin.manage")) {
+					s.SendErrorResponse(client, msg.ID, "permission denied")
+					return
+				}
+				goto UPDATE_OK
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+UPDATE_OK:
 	var payload struct {
 		ID          uint64
 		DisplayName *string
@@ -68,10 +109,22 @@ func (c *UserController) HandleUserUpdate(s *hub.Server, client *hub.Client, msg
 }
 
 func (c *UserController) HandleUserDelete(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); !(ok && c.authz.HasUserPermission(uid, "admin.manage")) {
+					s.SendErrorResponse(client, msg.ID, "permission denied")
+					return
+				}
+				goto DELETE_OK
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+DELETE_OK:
 	var payload struct{ ID uint64 }
 	b, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(b, &payload)
@@ -84,10 +137,22 @@ func (c *UserController) HandleUserDelete(s *hub.Server, client *hub.Client, msg
 
 // 权限管理：列出用户权限节点
 func (c *UserController) HandleUserPermList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); !(ok && c.authz.HasUserPermission(uid, "admin.manage")) {
+					s.SendErrorResponse(client, msg.ID, "permission denied")
+					return
+				}
+				goto PERM_LIST_OK
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+PERM_LIST_OK:
 	var payload struct {
 		UserID uint64 `json:"userId"`
 	}
@@ -108,10 +173,22 @@ func (c *UserController) HandleUserPermList(s *hub.Server, client *hub.Client, m
 
 // 添加用户权限节点
 func (c *UserController) HandleUserPermAdd(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); !(ok && c.authz.HasUserPermission(uid, "admin.manage")) {
+					s.SendErrorResponse(client, msg.ID, "permission denied")
+					return
+				}
+				goto PERM_ADD_OK
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+PERM_ADD_OK:
 	var payload struct {
 		UserID uint64 `json:"userId"`
 		Node   string `json:"node"`
@@ -131,10 +208,22 @@ func (c *UserController) HandleUserPermAdd(s *hub.Server, client *hub.Client, ms
 
 // 移除用户权限节点
 func (c *UserController) HandleUserPermRemove(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz != nil {
+		if m, ok := msg.Payload.(map[string]interface{}); ok {
+			if uk, ok := m["userKey"].(string); ok && uk != "" {
+				if uid, ok := c.authz.ResolveUserIDFromKey(uk); !(ok && c.authz.HasUserPermission(uid, "admin.manage")) {
+					s.SendErrorResponse(client, msg.ID, "permission denied")
+					return
+				}
+				goto PERM_REMOVE_OK
+			}
+		}
+	}
 	if !c.perm.IsAdminDevice(client.DeviceID) {
 		s.SendErrorResponse(client, msg.ID, "permission denied")
 		return
 	}
+PERM_REMOVE_OK:
 	var payload struct {
 		UserID uint64 `json:"userId"`
 		Node   string `json:"node"`

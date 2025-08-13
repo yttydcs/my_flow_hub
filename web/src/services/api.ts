@@ -1,4 +1,4 @@
-import type { ApiResponse, DeviceTreeNode, DeviceVariable, Key } from '@/types/api'
+import type { ApiResponse, DeviceTreeNode, DeviceVariable, Key, Device } from '@/types/api'
 import type { User } from '@/types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090/api'
@@ -157,14 +157,19 @@ class ApiService {
   async getKeys(): Promise<ApiResponse<Key[]>> {
     return this.request<Key[]>('/keys', { method: 'GET' })
   }
-  async createKey(data: { bindType?: 'user' | 'device'; bindId?: number; secret: string; expiresAt?: string; maxUses?: number; meta?: any }): Promise<ApiResponse<Key>> {
-    return this.request<Key>('/keys', { method: 'POST', body: JSON.stringify(data) })
+  async createKey(data: { bindType?: 'user' | 'device'; bindId?: number; expiresAt?: string; maxUses?: number; meta?: any }): Promise<ApiResponse<any>> {
+    return this.request<any>('/keys', { method: 'POST', body: JSON.stringify(data) })
   }
   async updateKey(data: Partial<Key> & { ID: number }): Promise<ApiResponse> {
     return this.request('/keys', { method: 'PUT', body: JSON.stringify(data) })
   }
   async deleteKey(id: number): Promise<ApiResponse> {
     return this.request('/keys', { method: 'DELETE', body: JSON.stringify({ id }) })
+  }
+
+  // 可见设备（用于创钥时提供设备选项）
+  async getKeyDevices(): Promise<ApiResponse<Device[]>> {
+    return this.request<Device[]>('/keys/devices', { method: 'GET' })
   }
 }
 

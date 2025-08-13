@@ -35,6 +35,11 @@ func (s *DeviceService) GetDeviceByUID(uid uint64) (*database.Device, error) {
 	return s.deviceRepo.FindByUID(uid)
 }
 
+// GetDeviceByID 根据数据库 ID 获取设备
+func (s *DeviceService) GetDeviceByID(id uint64) (*database.Device, error) {
+	return s.deviceRepo.FindByID(id)
+}
+
 // GetDeviceByHardwareID 根据硬件 ID 获取设备
 func (s *DeviceService) GetDeviceByHardwareID(hid string) (*database.Device, error) {
 	return s.deviceRepo.FindByHardwareID(hid)

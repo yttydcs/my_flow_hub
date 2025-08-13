@@ -1,6 +1,8 @@
 package controller
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -21,12 +23,20 @@ func NewKeyController(keys *service.KeyService, session *service.SessionService)
 
 // HandleKeyList 按规则返回可见密钥列表
 func (c *KeyController) HandleKeyList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	// 读取 manager 转发的用户 token
+	// 读取 manager 转发的用户 key 或 token
 	var requesterID uint64
 	if m, ok := msg.Payload.(map[string]interface{}); ok {
-		if t, ok := m["token"].(string); ok && c.session != nil {
-			if u, ok := c.session.Resolve(t); ok {
-				requesterID = u.ID
+		if uk, ok := m["userKey"].(string); ok && uk != "" {
+			if uid, _, err := c.keys.ValidateUserKey(uk); err == nil {
+				requesterID = uid
+			}
+		}
+		// 回退：若未能通过 userKey 解析，则尝试 token 会话
+		if requesterID == 0 {
+			if t, ok := m["token"].(string); ok && c.session != nil {
+				if u, ok := c.session.Resolve(t); ok {
+					requesterID = u.ID
+				}
 			}
 		}
 	}
@@ -42,60 +52,89 @@ func (c *KeyController) HandleKeyList(s *hub.Server, client *hub.Client, msg pro
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": list})
 }
 
+// HandleKeyCreate 由服务器生成密钥，并返回给客户端一次性展示
 func (c *KeyController) HandleKeyCreate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var body struct {
 		Token   string          `json:"token"`
+		UserKey string          `json:"userKey"`
 		BindTyp *string         `json:"bindType"`
 		BindID  *uint64         `json:"bindId"`
-		Secret  string          `json:"secret"`
 		Expires *time.Time      `json:"expiresAt"`
 		MaxUses *int            `json:"maxUses"`
 		Meta    json.RawMessage `json:"meta"`
+		Nodes   []string        `json:"nodes"`
 	}
 	b, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(b, &body)
-	if c.session == nil {
+	_ = json.Unmarshal(b, &body)
+	var requesterID uint64
+	if body.UserKey != "" {
+		if uid, _, err := c.keys.ValidateUserKey(body.UserKey); err == nil {
+			requesterID = uid
+		}
+	}
+	// 回退：若未能通过 userKey 解析，则尝试 token 会话
+	if requesterID == 0 && c.session != nil && body.Token != "" {
+		if u, ok := c.session.Resolve(body.Token); ok {
+			requesterID = u.ID
+		}
+	}
+	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return
 	}
-	u, ok := c.session.Resolve(body.Token)
-	if !ok {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
+
+	// 服务器生成随机密钥（十六进制字符串）；生产建议仅返回一次并保存哈希
+	random := make([]byte, 32)
+	if _, err := rand.Read(random); err != nil {
+		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
-	if body.Secret == "" {
-		s.SendErrorResponse(client, msg.ID, "invalid secret")
-		return
-	}
-	// 这里简化：直接保存明文 hash 字段；生产应存储哈希
-	k, err := c.keys.CreateKey(u.ID, body.BindTyp, body.BindID, body.Secret, body.Expires, body.MaxUses, body.Meta)
+	secret := hex.EncodeToString(random)
+
+	k, err := c.keys.CreateKey(requesterID, body.BindTyp, body.BindID, secret, body.Expires, body.MaxUses, body.Meta)
 	if err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": k})
+	if len(body.Nodes) > 0 {
+		if err := c.keys.AttachKeyPermissions(requesterID, k.ID, body.Nodes); err != nil {
+			s.SendErrorResponse(client, msg.ID, "invalid key permission nodes")
+			return
+		}
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": k, "secret": secret, "nodes": body.Nodes})
 }
 
 func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var body database.Key
 	b, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(b, &body)
+	_ = json.Unmarshal(b, &body)
 	var token string
+	var userKey string
 	if m, ok := msg.Payload.(map[string]interface{}); ok {
 		if t, ok := m["token"].(string); ok {
 			token = t
 		}
+		if k, ok := m["userKey"].(string); ok {
+			userKey = k
+		}
 	}
-	if c.session == nil {
+	var requesterID uint64
+	if userKey != "" {
+		if uid, _, err := c.keys.ValidateUserKey(userKey); err == nil {
+			requesterID = uid
+		}
+	}
+	if requesterID == 0 && c.session != nil && token != "" {
+		if u, ok := c.session.Resolve(token); ok {
+			requesterID = u.ID
+		}
+	}
+	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return
 	}
-	u, ok := c.session.Resolve(token)
-	if !ok {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-	if err := c.keys.UpdateKey(u.ID, &body); err != nil {
+	if err := c.keys.UpdateKey(requesterID, &body); err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
@@ -104,23 +143,61 @@ func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg p
 
 func (c *KeyController) HandleKeyDelete(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var body struct {
-		Token string `json:"token"`
-		ID    uint64 `json:"id"`
+		Token   string `json:"token"`
+		UserKey string `json:"userKey"`
+		ID      uint64 `json:"id"`
 	}
 	b, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(b, &body)
-	if c.session == nil {
+	_ = json.Unmarshal(b, &body)
+	var requesterID uint64
+	if body.UserKey != "" {
+		if uid, _, err := c.keys.ValidateUserKey(body.UserKey); err == nil {
+			requesterID = uid
+		}
+	}
+	if requesterID == 0 && c.session != nil && body.Token != "" {
+		if u, ok := c.session.Resolve(body.Token); ok {
+			requesterID = u.ID
+		}
+	}
+	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return
 	}
-	u, ok := c.session.Resolve(body.Token)
-	if !ok {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-	if err := c.keys.DeleteKey(u.ID, body.ID); err != nil {
+	if err := c.keys.DeleteKey(requesterID, body.ID); err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
+}
+
+// HandleKeyDevices 返回当前用户在创建密钥时可选择的设备集合
+func (c *KeyController) HandleKeyDevices(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	var body struct {
+		Token   string `json:"token"`
+		UserKey string `json:"userKey"`
+	}
+	b, _ := json.Marshal(msg.Payload)
+	_ = json.Unmarshal(b, &body)
+	var requesterID uint64
+	if body.UserKey != "" {
+		if uid, _, err := c.keys.ValidateUserKey(body.UserKey); err == nil {
+			requesterID = uid
+		}
+	}
+	if requesterID == 0 && c.session != nil && body.Token != "" {
+		if u, ok := c.session.Resolve(body.Token); ok {
+			requesterID = u.ID
+		}
+	}
+	if requesterID == 0 {
+		s.SendErrorResponse(client, msg.ID, "unauthorized")
+		return
+	}
+	list, err := c.keys.ListVisibleDevicesForKey(requesterID)
+	if err != nil {
+		s.SendErrorResponse(client, msg.ID, "failed")
+		return
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": list})
 }

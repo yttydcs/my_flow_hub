@@ -19,6 +19,7 @@ type VariableController struct {
 	service       *service.VariableService
 	deviceService *service.DeviceService
 	perm          *service.PermissionService
+	authz         *service.AuthzService
 }
 
 // NewVariableController 创建一个新的 VariableController
@@ -28,6 +29,17 @@ func NewVariableController(service *service.VariableService, deviceService *serv
 		deviceService: deviceService,
 		perm:          perm,
 	}
+}
+
+// SetAuthzService 可选注入统一授权服务
+func (c *VariableController) SetAuthzService(a *service.AuthzService) { c.authz = a }
+
+// authzVisibleAsAdmin: 基于用户权限判断是否具备 admin.manage（或 ** 由 HasPermission 内部处理）
+func (c *VariableController) authzVisibleAsAdmin(userID uint64) bool {
+	if c.authz == nil || userID == 0 {
+		return false
+	}
+	return c.authz.HasUserPermission(userID, "admin.manage")
 }
 
 // HandleVarsQuery 处理来自直接客户端的变量查询请求
@@ -74,6 +86,15 @@ func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Cli
 		s.SendErrorResponse(client, msg.ID, "Invalid payload format")
 		return
 	}
+	// 从 userKey 解析用户ID（可选）
+	var requesterUID uint64
+	if c.authz != nil {
+		if uk, ok := payload["userKey"].(string); ok && uk != "" {
+			if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok {
+				requesterUID = uid
+			}
+		}
+	}
 
 	if deviceIDStr, ok := payload["deviceId"].(string); ok && deviceIDStr != "" {
 		// 按设备ID查询
@@ -82,7 +103,13 @@ func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Cli
 			s.SendErrorResponse(client, msg.ID, "Invalid deviceId")
 			return
 		}
-		if !c.perm.CanReadVarsForDevice(client.DeviceID, deviceID) {
+		// 三来源校验
+		if c.authz != nil {
+			if !c.authz.CanControlDevice(client.DeviceID, deviceID, requesterUID) {
+				s.SendErrorResponse(client, msg.ID, "permission denied")
+				return
+			}
+		} else if !c.perm.CanReadVarsForDevice(client.DeviceID, deviceID) {
 			s.SendErrorResponse(client, msg.ID, "permission denied")
 			return
 		}
@@ -102,7 +129,13 @@ func (c *VariableController) HandleQueryVariables(s *hub.Server, client *hub.Cli
 		})
 	} else {
 		// 查询所有变量
-		if !c.perm.IsAdminDevice(client.DeviceID) {
+		if c.authz != nil {
+			// 读取全部变量仅允许管理员用户（admin.manage/**）
+			if requesterUID == 0 || !c.authz.CanControlDevice(client.DeviceID, client.DeviceID, requesterUID) || !c.authzVisibleAsAdmin(requesterUID) {
+				s.SendErrorResponse(client, msg.ID, "permission denied")
+				return
+			}
+		} else if !c.perm.IsAdminDevice(client.DeviceID) {
 			s.SendErrorResponse(client, msg.ID, "permission denied")
 			return
 		}
@@ -123,6 +156,15 @@ func (c *VariableController) HandleVarDelete(s *hub.Server, client *hub.Client, 
 	payload, ok := msg.Payload.(map[string]interface{})
 	if !ok {
 		return
+	}
+	// 从 userKey 解析用户ID（可选）
+	var requesterUID uint64
+	if c.authz != nil {
+		if uk, ok := payload["userKey"].(string); ok && uk != "" {
+			if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok {
+				requesterUID = uid
+			}
+		}
 	}
 
 	variables, ok := payload["variables"].([]interface{})
@@ -148,7 +190,11 @@ func (c *VariableController) HandleVarDelete(s *hub.Server, client *hub.Client, 
 			continue
 		}
 
-		if !c.perm.CanWriteVarsForDevice(client.DeviceID, targetDevice.DeviceUID) {
+		if c.authz != nil {
+			if !c.authz.CanControlDevice(client.DeviceID, targetDevice.DeviceUID, requesterUID) {
+				continue
+			}
+		} else if !c.perm.CanWriteVarsForDevice(client.DeviceID, targetDevice.DeviceUID) {
 			continue
 		}
 
@@ -164,6 +210,15 @@ func (c *VariableController) HandleVarUpdate(s *hub.Server, client *hub.Client, 
 	payload, ok := msg.Payload.(map[string]interface{})
 	if !ok {
 		return
+	}
+	// 从 userKey 解析用户ID（可选）
+	var requesterUID uint64
+	if c.authz != nil {
+		if uk, ok := payload["userKey"].(string); ok && uk != "" {
+			if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok {
+				requesterUID = uid
+			}
+		}
 	}
 
 	variables, ok := payload["variables"].(map[string]interface{})
@@ -193,7 +248,11 @@ func (c *VariableController) HandleVarUpdate(s *hub.Server, client *hub.Client, 
 			continue
 		}
 
-		if !c.perm.CanWriteVarsForDevice(client.DeviceID, targetDevice.DeviceUID) {
+		if c.authz != nil {
+			if !c.authz.CanControlDevice(client.DeviceID, targetDevice.DeviceUID, requesterUID) {
+				continue
+			}
+		} else if !c.perm.CanWriteVarsForDevice(client.DeviceID, targetDevice.DeviceUID) {
 			continue
 		}
 

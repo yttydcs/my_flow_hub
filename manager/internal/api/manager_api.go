@@ -120,6 +120,8 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 		keyHandler.HandleUpdateKey(w, r)
 	case path == "keys" && r.Method == "DELETE":
 		keyHandler.HandleDeleteKey(w, r)
+	case path == "keys/devices" && r.Method == "GET":
+		keyHandler.HandleKeyDevices(w, r)
 	default:
 		api.writeError(w, http.StatusNotFound, "API endpoint not found")
 	}
