@@ -32,7 +32,7 @@ func (h *DeviceHandler) HandleGetDevices(w http.ResponseWriter, r *http.Request)
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
 		Type:    "query_nodes",
-		Payload: map[string]interface{}{"userKey": token, "token": token},
+		Payload: map[string]interface{}{"userKey": token},
 	}
 
 	response, err := h.hubClient.SendRequest(req, 5*time.Second)
@@ -59,7 +59,6 @@ func (h *DeviceHandler) HandleCreateDevice(w http.ResponseWriter, r *http.Reques
 		reqBody = map[string]interface{}{}
 	}
 	reqBody["userKey"] = token
-	reqBody["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
@@ -89,7 +88,6 @@ func (h *DeviceHandler) HandleUpdateDevice(w http.ResponseWriter, r *http.Reques
 		reqBody = map[string]interface{}{}
 	}
 	reqBody["userKey"] = token
-	reqBody["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
@@ -119,7 +117,6 @@ func (h *DeviceHandler) HandleDeleteDevice(w http.ResponseWriter, r *http.Reques
 		reqBody = map[string]interface{}{}
 	}
 	reqBody["userKey"] = token
-	reqBody["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),

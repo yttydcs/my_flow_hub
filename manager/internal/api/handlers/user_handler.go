@@ -19,7 +19,7 @@ func (h *UserHandler) HandleListUsers(w http.ResponseWriter, r *http.Request) {
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_list", Payload: map[string]interface{}{"userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_list", Payload: map[string]interface{}{"userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -38,7 +38,7 @@ func (h *UserHandler) HandleCreateUser(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_create", Payload: map[string]interface{}{"username": body.Username, "displayName": body.DisplayName, "password": body.Password, "userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_create", Payload: map[string]interface{}{"username": body.Username, "displayName": body.DisplayName, "password": body.Password, "userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -62,7 +62,7 @@ func (h *UserHandler) HandleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_update", Payload: map[string]interface{}{"ID": body.ID, "DisplayName": body.DisplayName, "Password": body.Password, "Disabled": body.Disabled, "userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_update", Payload: map[string]interface{}{"ID": body.ID, "DisplayName": body.DisplayName, "Password": body.Password, "Disabled": body.Disabled, "userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -81,7 +81,7 @@ func (h *UserHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_delete", Payload: map[string]interface{}{"ID": body.ID, "userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_delete", Payload: map[string]interface{}{"ID": body.ID, "userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -103,7 +103,7 @@ func (h *UserHandler) HandleListUserPerms(w http.ResponseWriter, r *http.Request
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_list", Payload: map[string]interface{}{"userId": body.UserID, "userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_list", Payload: map[string]interface{}{"userId": body.UserID, "userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -126,7 +126,7 @@ func (h *UserHandler) HandleAddUserPerm(w http.ResponseWriter, r *http.Request) 
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_add", Payload: map[string]interface{}{"userId": body.UserID, "node": body.Node, "userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_add", Payload: map[string]interface{}{"userId": body.UserID, "node": body.Node, "userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -149,7 +149,7 @@ func (h *UserHandler) HandleRemoveUserPerm(w http.ResponseWriter, r *http.Reques
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_remove", Payload: map[string]interface{}{"userId": body.UserID, "node": body.Node, "userKey": token, "token": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_remove", Payload: map[string]interface{}{"userId": body.UserID, "node": body.Node, "userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())

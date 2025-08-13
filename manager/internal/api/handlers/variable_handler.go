@@ -35,7 +35,6 @@ func (h *VariableHandler) HandleGetVariables(w http.ResponseWriter, r *http.Requ
 		payload["deviceId"] = deviceIDStr
 	}
 	payload["userKey"] = token
-	payload["token"] = token
 
 	req := protocol.BaseMessage{
 		ID:      uuid.New().String(),
@@ -75,7 +74,6 @@ func (h *VariableHandler) HandleUpdateVariable(w http.ResponseWriter, r *http.Re
 		Payload: map[string]interface{}{
 			"variables": reqBody,
 			"userKey":   token,
-			"token":     token,
 		},
 	}
 
@@ -110,7 +108,6 @@ func (h *VariableHandler) HandleDeleteVariable(w http.ResponseWriter, r *http.Re
 		Payload: map[string]interface{}{
 			"variables": reqBody.Variables,
 			"userKey":   token,
-			"token":     token,
 		},
 	}
 

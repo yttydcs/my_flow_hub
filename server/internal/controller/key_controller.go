@@ -13,30 +13,21 @@ import (
 )
 
 type KeyController struct {
-	keys    *service.KeyService
-	session *service.SessionService
+	keys *service.KeyService
 }
 
-func NewKeyController(keys *service.KeyService, session *service.SessionService) *KeyController {
-	return &KeyController{keys: keys, session: session}
+func NewKeyController(keys *service.KeyService) *KeyController {
+	return &KeyController{keys: keys}
 }
 
 // HandleKeyList 按规则返回可见密钥列表
 func (c *KeyController) HandleKeyList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	// 读取 manager 转发的用户 key 或 token
+	// 读取 manager 转发的用户 key（仅 key 模式）
 	var requesterID uint64
 	if m, ok := msg.Payload.(map[string]interface{}); ok {
 		if uk, ok := m["userKey"].(string); ok && uk != "" {
 			if uid, _, err := c.keys.ValidateUserKey(uk); err == nil {
 				requesterID = uid
-			}
-		}
-		// 回退：若未能通过 userKey 解析，则尝试 token 会话
-		if requesterID == 0 {
-			if t, ok := m["token"].(string); ok && c.session != nil {
-				if u, ok := c.session.Resolve(t); ok {
-					requesterID = u.ID
-				}
 			}
 		}
 	}
@@ -55,7 +46,6 @@ func (c *KeyController) HandleKeyList(s *hub.Server, client *hub.Client, msg pro
 // HandleKeyCreate 由服务器生成密钥，并返回给客户端一次性展示
 func (c *KeyController) HandleKeyCreate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var body struct {
-		Token   string          `json:"token"`
 		UserKey string          `json:"userKey"`
 		BindTyp *string         `json:"bindType"`
 		BindID  *uint64         `json:"bindId"`
@@ -73,11 +63,7 @@ func (c *KeyController) HandleKeyCreate(s *hub.Server, client *hub.Client, msg p
 		}
 	}
 	// 回退：若未能通过 userKey 解析，则尝试 token 会话
-	if requesterID == 0 && c.session != nil && body.Token != "" {
-		if u, ok := c.session.Resolve(body.Token); ok {
-			requesterID = u.ID
-		}
-	}
+	// key-only：不再支持 token 回退
 	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return
@@ -109,12 +95,8 @@ func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg p
 	var body database.Key
 	b, _ := json.Marshal(msg.Payload)
 	_ = json.Unmarshal(b, &body)
-	var token string
 	var userKey string
 	if m, ok := msg.Payload.(map[string]interface{}); ok {
-		if t, ok := m["token"].(string); ok {
-			token = t
-		}
 		if k, ok := m["userKey"].(string); ok {
 			userKey = k
 		}
@@ -125,11 +107,7 @@ func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg p
 			requesterID = uid
 		}
 	}
-	if requesterID == 0 && c.session != nil && token != "" {
-		if u, ok := c.session.Resolve(token); ok {
-			requesterID = u.ID
-		}
-	}
+	// key-only：不再支持 token 回退
 	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return
@@ -143,7 +121,6 @@ func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg p
 
 func (c *KeyController) HandleKeyDelete(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var body struct {
-		Token   string `json:"token"`
 		UserKey string `json:"userKey"`
 		ID      uint64 `json:"id"`
 	}
@@ -155,11 +132,7 @@ func (c *KeyController) HandleKeyDelete(s *hub.Server, client *hub.Client, msg p
 			requesterID = uid
 		}
 	}
-	if requesterID == 0 && c.session != nil && body.Token != "" {
-		if u, ok := c.session.Resolve(body.Token); ok {
-			requesterID = u.ID
-		}
-	}
+	// key-only：不再支持 token 回退
 	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return
@@ -174,7 +147,6 @@ func (c *KeyController) HandleKeyDelete(s *hub.Server, client *hub.Client, msg p
 // HandleKeyDevices 返回当前用户在创建密钥时可选择的设备集合
 func (c *KeyController) HandleKeyDevices(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var body struct {
-		Token   string `json:"token"`
 		UserKey string `json:"userKey"`
 	}
 	b, _ := json.Marshal(msg.Payload)
@@ -185,11 +157,7 @@ func (c *KeyController) HandleKeyDevices(s *hub.Server, client *hub.Client, msg 
 			requesterID = uid
 		}
 	}
-	if requesterID == 0 && c.session != nil && body.Token != "" {
-		if u, ok := c.session.Resolve(body.Token); ok {
-			requesterID = u.ID
-		}
-	}
+	// key-only：不再支持 token 回退
 	if requesterID == 0 {
 		s.SendErrorResponse(client, msg.ID, "unauthorized")
 		return

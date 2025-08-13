@@ -6,7 +6,8 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 
 - 服务地址: `http://localhost:8090`
 - 所有 API 路径前缀: `/api/`
-- 鉴权: 除 `/api/auth/login` 外，其余接口都需要请求头 `Authorization: Bearer <token>`。
+- 鉴权: 除 `/api/auth/login` 外，其余接口都需要请求头 `Authorization: Bearer <userKey>`（key-only 模式）。
+  提示：`/api/auth/login` 返回的 `token` 字段即 userKey 的明文值，请直接作为 Authorization 使用。
 
 ## API 端点
 
@@ -260,18 +261,19 @@ POST `/api/users/perms/remove` 请求体：`{ "userId": 2, "node": "var.read.**"
 ### 登录并获取所有节点：
 
 ```bash
-# 登录
+# 登录（获取 userKey 明文）
 TOKEN=$(curl -s -X POST http://localhost:8090/api/auth/login -H "Content-Type: application/json" -d '{"username":"admin","password":"admin123!"}')
+USER_KEY=$(echo $TOKEN | jq -r .token)
 
 # 获取所有节点
-curl -H "Authorization: Bearer $TOKEN" -X GET http://localhost:8090/api/nodes
+curl -H "Authorization: Bearer $USER_KEY" -X GET http://localhost:8090/api/nodes
 ```
 
 ### 更新变量：
 
 ```bash
 curl -X POST http://localhost:8090/api/variables \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $USER_KEY" \
   -d '{"variables": {"temperature": 25.5, "status": "active"}}'
 ```
 
@@ -279,7 +281,7 @@ curl -X POST http://localhost:8090/api/variables \
 
 ```bash
 curl -X POST http://localhost:8090/api/message \
-  -H "Content-Type: application/json" -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -H "Authorization: Bearer $USER_KEY" \
   -d '{
     "target": 10002,
     "type": "msg_send",

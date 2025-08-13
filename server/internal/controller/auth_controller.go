@@ -1,22 +1,27 @@
 package controller
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"myflowhub/pkg/protocol"
 	"myflowhub/server/internal/hub"
 	"myflowhub/server/internal/repository"
 	"myflowhub/server/internal/service"
+	"time"
 
 	"github.com/rs/zerolog/log"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // AuthController 负责处理认证和注册相关的消息
 type AuthController struct {
 	authService   *service.AuthService
 	deviceService *service.DeviceService
-	session       *service.SessionService
 	perm          *service.PermissionService
 	permRepo      *repository.PermissionRepository
+	keyService    *service.KeyService
+	userRepo      *repository.UserRepository
 }
 
 // NewAuthController 创建一个新的 AuthController
@@ -27,11 +32,14 @@ func NewAuthController(authService *service.AuthService, deviceService *service.
 	}
 }
 
-// SetSessionService 依赖注入（可选）
-func (c *AuthController) SetSessionService(s *service.SessionService) { c.session = s }
+// SetKeyService 注入 KeyService，用于登录签发会话密钥
+func (c *AuthController) SetKeyService(k *service.KeyService) { c.keyService = k }
 
 // SetPermissionRepository 注入权限仓库，用于查询用户权限节点
 func (c *AuthController) SetPermissionRepository(p *repository.PermissionRepository) { c.permRepo = p }
+
+// SetUserRepository 注入用户仓库，用于登录校验
+func (c *AuthController) SetUserRepository(u *repository.UserRepository) { c.userRepo = u }
 
 // HandleAuthRequest 处理常规设备认证请求
 func (c *AuthController) HandleAuthRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
@@ -79,23 +87,47 @@ func (c *AuthController) HandleManagerAuthRequest(s *hub.Server, client *hub.Cli
 	})
 }
 
-// HandleUserLogin 处理用户登录，返回临时令牌（最小实现）
+// HandleUserLogin 处理用户登录，返回用户会话密钥（key-only 模式）
 func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var payload struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+		Username  string     `json:"username"`
+		Password  string     `json:"password"`
+		ExpiresAt *time.Time `json:"expiresAt"`
+		MaxUses   *int       `json:"maxUses"`
 	}
 	b, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(b, &payload)
-	if c.session == nil {
+
+	if c.userRepo == nil || c.keyService == nil {
 		s.SendErrorResponse(client, msg.ID, "login not configured")
 		return
 	}
-	token, user, ok := c.session.Login(payload.Username, payload.Password)
-	if !ok {
+	// 校验用户名/密码
+	user, err := c.userRepo.FindByUsername(payload.Username)
+	if err != nil || user.Disabled {
 		s.SendErrorResponse(client, msg.ID, "invalid credentials")
 		return
 	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(payload.Password)) != nil {
+		s.SendErrorResponse(client, msg.ID, "invalid credentials")
+		return
+	}
+
+	// 生成随机 secret，并创建绑定到 user 的密钥
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		s.SendErrorResponse(client, msg.ID, "failed to issue key")
+		return
+	}
+	secret := hex.EncodeToString(buf)
+	bind := "user"
+	uid := user.ID
+	keyObj, err2 := c.keyService.CreateKey(user.ID, &bind, &uid, secret, payload.ExpiresAt, payload.MaxUses, nil)
+	if err2 != nil {
+		s.SendErrorResponse(client, msg.ID, "failed to issue key")
+		return
+	}
+
 	// 查询权限节点快照
 	perms := []string{}
 	if c.permRepo != nil {
@@ -107,7 +139,8 @@ func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg 
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{
 		"success":     true,
-		"token":       token,
+		"token":       secret,
+		"keyId":       keyObj.ID,
 		"user":        map[string]interface{}{"id": user.ID, "username": user.Username, "displayName": user.DisplayName},
 		"permissions": perms,
 	})

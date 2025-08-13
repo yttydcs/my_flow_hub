@@ -42,7 +42,6 @@ func main() {
 	authService := service.NewAuthService(deviceRepo, variableRepo)
 	permService := service.NewPermissionService(deviceRepo)
 	userService := service.NewUserService(userRepo)
-	sessionService := service.NewSessionService(userRepo)
 	keyService := service.NewKeyService(keyRepo, permRepo, deviceRepo)
 	authzService := service.NewAuthzService(keyService, deviceRepo, permRepo)
 
@@ -51,11 +50,13 @@ func main() {
 	variableController := controller.NewVariableController(variableService, deviceService, permService)
 	authController := controller.NewAuthController(authService, deviceService)
 	// inject optional services
-	authController.SetSessionService(sessionService)
+	// 仅 key 模式：不再注入 SessionService；login 将返回 key
 	authController.SetPermissionRepository(permRepo)
+	authController.SetKeyService(keyService)
+	authController.SetUserRepository(userRepo)
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService, permRepo)
-	keyController := controller.NewKeyController(keyService, sessionService)
+	keyController := controller.NewKeyController(keyService)
 	// 将统一授权服务注入设备与变量控制器
 	deviceController.SetAuthzService(authzService)
 	variableController.SetAuthzService(authzService)

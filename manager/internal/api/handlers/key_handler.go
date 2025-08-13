@@ -22,7 +22,7 @@ func (h *KeyHandler) HandleListKeys(w http.ResponseWriter, r *http.Request) {
 		token = token[7:]
 	}
 	// 允许 Authorization 用作 userKey（未来切换为仅 key）
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_list", Payload: map[string]interface{}{"token": token, "userKey": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_list", Payload: map[string]interface{}{"userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -41,7 +41,6 @@ func (h *KeyHandler) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	body["token"] = token
 	body["userKey"] = token
 	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_create", Payload: body}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
@@ -62,7 +61,6 @@ func (h *KeyHandler) HandleUpdateKey(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	body["token"] = token
 	body["userKey"] = token
 	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_update", Payload: body}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
@@ -85,7 +83,7 @@ func (h *KeyHandler) HandleDeleteKey(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w, http.StatusBadRequest, "invalid body")
 		return
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_delete", Payload: map[string]interface{}{"token": token, "userKey": token, "id": body.ID}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_delete", Payload: map[string]interface{}{"userKey": token, "id": body.ID}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
@@ -100,7 +98,7 @@ func (h *KeyHandler) HandleKeyDevices(w http.ResponseWriter, r *http.Request) {
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_devices", Payload: map[string]interface{}{"token": token, "userKey": token}}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "key_devices", Payload: map[string]interface{}{"userKey": token}}
 	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())

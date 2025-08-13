@@ -1,0 +1,31 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "go-build-server-module",
+			"type": "shell",
+			"command": "go",
+			"args": [
+				"build",
+				"./..."
+			],
+			"problemMatcher": [
+				"$go"
+			],
+			"group": "build"
+		},
+		{
+			"label": "build-server",
+			"type": "shell",
+			"command": "go",
+			"args": [
+				"build",
+				"./..."
+			],
+			"problemMatcher": [
+				"$go"
+			],
+			"group": "build"
+		}
+	]
+}
