@@ -1,131 +1,122 @@
 <template>
-  <div style="height: calc(100vh - 60px); overflow: hidden;">
-    <!-- 状态卡片 -->
-    <n-space style="padding: 24px; padding-bottom: 16px;" size="large">
-      <n-card style="min-width: 150px;">
-        <n-statistic label="设备数量" :value="deviceCount" />
-      </n-card>
-      
-      <n-card style="min-width: 150px;">
-        <n-statistic label="变量数量" :value="variables.length" />
-      </n-card>
-      
-      <n-card style="min-width: 200px;">
-        <n-statistic label="最后更新">
-          {{ lastUpdated ? lastUpdated.toLocaleString() : '未更新' }}
-        </n-statistic>
-      </n-card>
-    </n-space>
-
-    <!-- 设备树区域 -->
-    <div style="height: calc(100% - 120px); padding: 0 24px 24px;">
-      <n-card style="height: 100%;">
-        <template #header>
-          <n-space align="center">
-            <n-icon size="20"><TreeIcon /></n-icon>
-            <span>设备树</span>
-          </n-space>
-        </template>
-        <div style="height: calc(100% - 60px); overflow-y: auto; padding: 16px;">
-          <DeviceTree />
+  <div class="hero">
+    <div class="hero-inner">
+      <div class="hero-left">
+        <div class="title">MyFlowHub 中枢</div>
+        <div class="subtitle">统一管理设备、变量与访问权限</div>
+        <div class="ctas">
+          <n-button type="primary" size="large" @click="$router.push('/manage/devices')">开始管理设备</n-button>
+          <n-button size="large" tertiary @click="$router.push('/manage/keys')">发放用户密钥</n-button>
         </div>
-      </n-card>
+        <div class="stats">
+          <n-statistic label="设备数量" :value="deviceCount" />
+          <n-statistic label="变量数量" :value="variables.length" />
+        </div>
+      </div>
+      <div class="hero-right">
+        <div class="blob">
+          <div class="blob-inner">
+            <div class="blob-title">所有设备 ({{ allDevices.length }})</div>
+            <div class="device-list">
+              <div v-for="d in allDevices" :key="d.DeviceUID" class="device-item">
+                <div class="name">{{ d.Name || d.HardwareID || d.DeviceUID }}</div>
+                <div class="meta">{{ d.Role }} • 最后在线：{{ formatLastSeen(d.LastSeen) }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
-
-    <!-- 错误提示 -->
-    <n-message-provider>
-      <n-alert 
-        v-if="error" 
-        type="error" 
-        :title="'错误'" 
-        closable
-        @close="clearError"
-        style="position: fixed; top: 80px; right: 20px; z-index: 1000; max-width: 400px;"
-      >
-        {{ error }}
-      </n-alert>
-    </n-message-provider>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, watch } from 'vue'
-import { 
-  NSpace, NIcon, NStatistic, NAlert, 
-  NMessageProvider, NCard
-} from 'naive-ui'
-import { 
-  GitNetwork as TreeIcon
-} from '@vicons/ionicons5'
+import { computed, onMounted } from 'vue'
+import { NButton, NStatistic } from 'naive-ui'
 import { useHubStore } from '@/stores/hub'
-import { useMessage } from 'naive-ui'
-import DeviceTree from '@/components/DeviceTree.vue'
+import type { Device, DeviceTreeNode } from '@/types/api'
 
-const message = useMessage()
-const hubStore = useHubStore()
+const hub = useHubStore()
+const deviceCount = computed(() => hub.deviceCount)
+const variables = computed(() => hub.variables)
 
-const {
-  devices,
-  variables,
-  deviceCount,
-  lastUpdated,
-  error,
-  clearError
-} = hubStore
-
-let pollingInterval: number | null = null
-
-// 轮询数据更新
-const startPolling = () => {
-  // 立即执行一次
-  hubStore.fetchDeviceTree()
-  hubStore.fetchVariables()
-  
-  // 设置定时轮询
-  pollingInterval = window.setInterval(async () => {
-    try {
-      await hubStore.fetchDeviceTree()
-      await hubStore.fetchVariables()
-    } catch (err) {
-      console.error('Polling error:', err)
-    }
-  }, 1000) // 1秒轮询
-}
-
-// 停止轮询
-const stopPolling = () => {
-  if (pollingInterval) {
-    clearInterval(pollingInterval)
-    pollingInterval = null
-  }
-}
-
-// 监听错误变化，自动显示消息
-watch(() => error, (newError) => {
-  if (newError) {
-    message.error(newError)
-  }
-})
-
-// 组件挂载时开始轮询
 onMounted(() => {
-  console.log('DashboardView: Starting polling')
-  startPolling()
+  // 首屏只拉一次，避免旧版轮询带来的页面抖动
+  hub.fetchDeviceTree()
+  hub.fetchVariables()
 })
 
-// 组件卸载时停止轮询
-onUnmounted(() => {
-  console.log('DashboardView: Stopping polling')
-  stopPolling()
-})
+// 将设备树拍平成数组
+function flattenDevices(nodes: DeviceTreeNode[]): Device[] {
+  const list: Device[] = []
+  const walk = (arr: DeviceTreeNode[]) => {
+    for (const n of arr) {
+      list.push(n)
+      if (n.children && n.children.length) walk(n.children)
+    }
+  }
+  walk(nodes)
+  return list
+}
+
+const allDevices = computed(() => flattenDevices(hub.devices))
+
+function formatLastSeen(ls?: string | null): string {
+  if (!ls) return '未知'
+  const t = new Date(ls)
+  return t.toLocaleString()
+}
 </script>
 
-<<style scoped>
-:deep(.n-card .n-card-header) {
-  padding-bottom: 8px;
+<style scoped>
+.hero {
+  height: calc(100vh - 60px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: linear-gradient(135deg, rgba(24,160,88,.06), rgba(24,160,88,.02));
 }
-
-:deep(.n-statistic) {
-  text-align: center;
+.hero-inner {
+  width: 100%;
+  max-width: 1080px;
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 32px;
+  align-items: center;
+}
+.hero-left .title {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: .2px;
+}
+.hero-left .subtitle {
+  margin-top: 8px;
+  color: #666;
+}
+.ctas { margin-top: 20px; display: flex; gap: 12px; }
+.stats { margin-top: 24px; display: flex; gap: 24px; }
+.hero-right { position: relative; }
+.blob {
+  width: 100%;
+  height: 320px;
+  border-radius: 8px;
+  overflow: hidden; /* 不显示滚动条 */
+  background: radial-gradient(120px 80px at 60% 40%, rgba(24,160,88,.25), rgba(24,160,88,0)),
+              radial-gradient(140px 100px at 20% 70%, rgba(24,160,88,.2), rgba(24,160,88,0)),
+              linear-gradient(135deg, rgba(24,160,88,.08), rgba(24,160,88,.02));
+}
+.blob-inner { padding: 16px; height: 100%; box-sizing: border-box; display: flex; flex-direction: column; user-select: none; }
+.blob-title { font-weight: 700; margin-bottom: 8px; }
+.device-list { /* 可滚动但隐藏滚动条 */ flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: none; -ms-overflow-style: none; user-select: none; }
+.device-list::-webkit-scrollbar { width: 0; height: 0; }
+.device-item { padding: 6px 6px; border-bottom: 1px solid rgba(0,0,0,.06); border-radius: 10px; transition: background .2s ease, box-shadow .2s ease, transform .2s ease; cursor: default; user-select: none; }
+.device-item:hover { background: rgba(24,160,88,.06); box-shadow: 0 2px 8px -4px rgba(0,0,0,.12); transform: translateY(-1px); border-bottom-color: transparent; }
+.device-item:last-child { border-bottom: none; }
+.device-item .name { font-weight: 600; }
+.device-item .meta { margin-top: 2px; font-size: 12px; color: #666; }
+@media (max-width: 900px) {
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-right { display: none; }
 }
 </style>

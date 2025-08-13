@@ -83,6 +83,7 @@ const handleMenuSelect = (key: string) => {
 
 <style scoped>
 .n-layout-sider {
-  background-color: #fafafa;
+  /* 使用 Naive UI 主题变量，随明暗主题自动切换 */
+  background-color: var(--n-color);
 }
 </style>

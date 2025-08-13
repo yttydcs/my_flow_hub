@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
-import { NMessageProvider, NDialogProvider, NConfigProvider, NGlobalStyle } from 'naive-ui'
+import { computed } from 'vue'
+import { NMessageProvider, NDialogProvider, NConfigProvider, NGlobalStyle, darkTheme } from 'naive-ui'
+import { useUIStore } from '@/stores/ui'
+
+const ui = useUIStore()
+const theme = computed(() => (ui.darkMode ? darkTheme : undefined))
 </script>
 
 <template>
-  <n-config-provider>
+  <n-config-provider :theme="theme">
     <n-message-provider>
       <n-dialog-provider>
         <RouterView />
