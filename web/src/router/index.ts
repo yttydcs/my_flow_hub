@@ -36,6 +36,11 @@ const router = createRouter({
               component: () => import('@/views/manage/VariablesView.vue')
             },
             {
+              path: 'keys',
+              name: 'manage-keys',
+              component: () => import('@/views/manage/KeysView.vue')
+            },
+            {
               path: 'users',
               name: 'manage-users',
               component: () => import('@/views/manage/UsersView.vue'),

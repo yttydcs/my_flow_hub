@@ -56,3 +56,17 @@ export interface User {
   CreatedAt: string
   UpdatedAt: string
 }
+
+// 密钥类型（前端使用字段子集）
+export interface Key {
+  ID: number
+  OwnerUserID?: number | null
+  BindSubjectType?: 'user' | 'device' | null
+  BindSubjectID?: number | null
+  ExpiresAt?: string | null
+  MaxUses?: number | null
+  RemainingUses?: number | null
+  Revoked: boolean
+  IssuedAt: string
+  // SecretHash 与 Meta 通常不在列表中直接展示
+}

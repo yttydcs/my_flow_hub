@@ -54,6 +54,7 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 	deviceHandler := handlers.NewDeviceHandler(api.hubClient)
 	variableHandler := handlers.NewVariableHandler(api.hubClient)
 	userHandler := handlers.NewUserHandler(api.hubClient)
+	keyHandler := handlers.NewKeyHandler(api.hubClient)
 
 	// 简单鉴权：除登录外的接口都需要 Authorization: Bearer <token>
 	if path != "auth/login" {
@@ -110,6 +111,15 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 		userHandler.HandleAddUserPerm(w, r)
 	case path == "users/perms/remove" && r.Method == "POST":
 		userHandler.HandleRemoveUserPerm(w, r)
+	// 密钥管理
+	case path == "keys" && r.Method == "GET":
+		keyHandler.HandleListKeys(w, r)
+	case path == "keys" && r.Method == "POST":
+		keyHandler.HandleCreateKey(w, r)
+	case path == "keys" && r.Method == "PUT":
+		keyHandler.HandleUpdateKey(w, r)
+	case path == "keys" && r.Method == "DELETE":
+		keyHandler.HandleDeleteKey(w, r)
 	default:
 		api.writeError(w, http.StatusNotFound, "API endpoint not found")
 	}

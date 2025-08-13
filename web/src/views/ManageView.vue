@@ -51,7 +51,8 @@ const currentMenuKey = computed(() => {
 const menuOptions = computed<MenuOption[]>(() => {
   const base: MenuOption[] = [
     { label: '设备管理', key: 'manage-devices', icon: () => h(DeviceIcon) },
-    { label: '变量管理', key: 'manage-variables', icon: () => h(VariableIcon) }
+  { label: '变量管理', key: 'manage-variables', icon: () => h(VariableIcon) },
+  { label: '密钥管理', key: 'manage-keys', icon: () => h(VariableIcon) }
   ]
   if (auth.isAdmin) base.push({ label: '用户管理', key: 'manage-users', icon: () => h(UsersIcon) })
   base.push({ label: '日志管理', key: 'manage-logs', icon: () => h(LogsIcon) })
@@ -66,6 +67,9 @@ const handleMenuSelect = (key: string) => {
       break
     case 'manage-variables':
       router.push('/manage/variables')
+      break
+    case 'manage-keys':
+      router.push('/manage/keys')
       break
     case 'manage-users':
       router.push('/manage/users')

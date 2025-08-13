@@ -34,6 +34,7 @@ func main() {
 	variableRepo := repository.NewVariableRepository(database.DB)
 	userRepo := repository.NewUserRepository(database.DB)
 	permRepo := repository.NewPermissionRepository(database.DB)
+	keyRepo := repository.NewKeyRepository(database.DB)
 
 	// 初始化 service
 	deviceService := service.NewDeviceService(deviceRepo, variableRepo, database.DB)
@@ -42,6 +43,7 @@ func main() {
 	permService := service.NewPermissionService(deviceRepo)
 	userService := service.NewUserService(userRepo)
 	sessionService := service.NewSessionService(userRepo)
+	keyService := service.NewKeyService(keyRepo, permRepo)
 
 	// 初始化 controller
 	deviceController := controller.NewDeviceController(deviceService, permService)
@@ -52,6 +54,7 @@ func main() {
 	authController.SetPermissionRepository(permRepo)
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService, permRepo)
+	keyController := controller.NewKeyController(keyService, sessionService)
 
 	var server *hub.Server
 
@@ -85,6 +88,11 @@ func main() {
 	server.RegisterRoute("user_perm_list", userController.HandleUserPermList)
 	server.RegisterRoute("user_perm_add", userController.HandleUserPermAdd)
 	server.RegisterRoute("user_perm_remove", userController.HandleUserPermRemove)
+	// 密钥管理（按用户权限范围）
+	server.RegisterRoute("key_list", keyController.HandleKeyList)
+	server.RegisterRoute("key_create", keyController.HandleKeyCreate)
+	server.RegisterRoute("key_update", keyController.HandleKeyUpdate)
+	server.RegisterRoute("key_delete", keyController.HandleKeyDelete)
 
 	// 启动前：按策略初始化默认管理员
 	seedDefaultAdmin(userService, permRepo)
