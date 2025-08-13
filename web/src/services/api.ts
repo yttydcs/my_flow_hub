@@ -45,6 +45,16 @@ class ApiService {
     })
   }
 
+  // 获取当前用户
+  async me(): Promise<ApiResponse<{ user: any; permissions: string[] }>> {
+    return this.request<{ user: any; permissions: string[] }>(`/auth/me`, { method: 'GET' })
+  }
+
+  // 登出（撤销当前 token）
+  async logout(): Promise<ApiResponse> {
+    return this.request(`/auth/logout`, { method: 'POST' })
+  }
+
   // 获取设备树
   async getDeviceTree(): Promise<ApiResponse<DeviceTreeNode[]>> {
     return this.request<DeviceTreeNode[]>('/nodes')

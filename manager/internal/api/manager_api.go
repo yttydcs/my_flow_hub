@@ -70,6 +70,10 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 	// 登录
 	case path == "auth/login" && r.Method == "POST":
 		api.handleLogin(w, r)
+	case path == "auth/me" && r.Method == "GET":
+		api.handleMe(w, r)
+	case path == "auth/logout" && r.Method == "POST":
+		api.handleLogout(w, r)
 	// 设备相关路由
 	case path == "nodes" && r.Method == "GET":
 		deviceHandler.HandleGetDevices(w, r)
@@ -201,6 +205,48 @@ func (api *ManagerAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
 	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
 	if err != nil {
 		api.writeError(w, http.StatusUnauthorized, "login failed")
+		return
+	}
+	api.writeJSON(w, resp.Payload)
+}
+
+// handleMe 根据 Authorization 的 userKey 返回用户与权限
+func (api *ManagerAPI) handleMe(w http.ResponseWriter, r *http.Request) {
+	if !api.hubClient.IsConnected() {
+		api.writeError(w, http.StatusServiceUnavailable, "Not connected to hub")
+		return
+	}
+	authz := r.Header.Get("Authorization")
+	if len(authz) < 8 {
+		api.writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	token := authz[7:]
+	msg := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_me", Payload: map[string]interface{}{"userKey": token}, Timestamp: time.Now()}
+	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
+	if err != nil {
+		api.writeError(w, http.StatusUnauthorized, "invalid")
+		return
+	}
+	api.writeJSON(w, resp.Payload)
+}
+
+// handleLogout 撤销当前 userKey
+func (api *ManagerAPI) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if !api.hubClient.IsConnected() {
+		api.writeError(w, http.StatusServiceUnavailable, "Not connected to hub")
+		return
+	}
+	authz := r.Header.Get("Authorization")
+	if len(authz) < 8 {
+		api.writeError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	token := authz[7:]
+	msg := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_logout", Payload: map[string]interface{}{"userKey": token}, Timestamp: time.Now()}
+	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
+	if err != nil {
+		api.writeError(w, http.StatusInternalServerError, "failed")
 		return
 	}
 	api.writeJSON(w, resp.Payload)

@@ -19,6 +19,7 @@ export const useAuthStore = defineStore('auth', () => {
       if (t) {
         token.value = t
         ;(apiService as any).setToken(token.value)
+        try { localStorage.setItem('mf_token', token.value) } catch {}
       }
       if (u) {
         user.value = { id: u.id, username: u.username, displayName: u.displayName }
@@ -29,11 +30,36 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function logout() {
+    // 主动让后端撤销当前 token
+    const t = token.value
+    if (t) { apiService.logout().catch(() => {}) }
     token.value = null
     user.value = null
     permissions.value = []
     ;(apiService as any).setToken(null)
+    try { localStorage.removeItem('mf_token') } catch {}
   }
+
+  // 启动时尝试恢复 token 并拉取用户信息
+  ;(() => {
+    try {
+      const t = localStorage.getItem('mf_token')
+      if (t) {
+        token.value = t
+        ;(apiService as any).setToken(t)
+        // 同步获取用户信息
+        apiService.me().then((res: any) => {
+          if (res && res.user) {
+            user.value = { id: res.user.id, username: res.user.username, displayName: res.user.displayName }
+            permissions.value = res.permissions || []
+          } else {
+            // 失效则清理
+            logout()
+          }
+        }).catch(() => logout())
+      }
+    } catch {}
+  })()
 
   return { token, user, permissions, isLoggedIn, isAdmin, login, logout }
 })

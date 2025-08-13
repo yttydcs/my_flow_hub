@@ -87,6 +87,76 @@ func (s *KeyService) ValidateUserKey(secret string) (uint64, *database.Key, erro
 	return userID, k, nil
 }
 
+// PeekUserKey 校验密钥但不消耗剩余次数
+func (s *KeyService) PeekUserKey(secret string) (uint64, *database.Key, error) {
+	if secret == "" {
+		return 0, nil, errors.New("empty key")
+	}
+	k, err := s.keys.FindBySecretHash(secret)
+	if err != nil {
+		sum := sha256.Sum256([]byte(secret))
+		hashed := hex.EncodeToString(sum[:])
+		k, err = s.keys.FindBySecretHash(hashed)
+		if err != nil {
+			return 0, nil, err
+		}
+	}
+	if k.Revoked {
+		return 0, nil, errors.New("revoked")
+	}
+	if k.ExpiresAt != nil && time.Now().After(*k.ExpiresAt) {
+		return 0, nil, errors.New("expired")
+	}
+	if k.MaxUses != nil && k.RemainingUses != nil && *k.RemainingUses <= 0 {
+		return 0, nil, errors.New("exhausted")
+	}
+	var userID uint64
+	if k.BindSubjectType != nil && *k.BindSubjectType == "user" && k.BindSubjectID != nil {
+		userID = *k.BindSubjectID
+	} else if k.OwnerUserID != nil {
+		userID = *k.OwnerUserID
+	}
+	if userID == 0 {
+		return 0, nil, errors.New("invalid key subject")
+	}
+	return userID, k, nil
+}
+
+// RevokeBySecret 撤销密钥（支持明文或哈希传入）
+func (s *KeyService) RevokeBySecret(secret string) error {
+	if secret == "" {
+		return errors.New("empty key")
+	}
+	k, err := s.keys.FindBySecretHash(secret)
+	if err != nil {
+		sum := sha256.Sum256([]byte(secret))
+		hashed := hex.EncodeToString(sum[:])
+		k, err = s.keys.FindBySecretHash(hashed)
+		if err != nil {
+			return err
+		}
+	}
+	k.Revoked = true
+	return s.keys.Update(k)
+}
+
+// DeleteBySecret 通过明文或哈希删除密钥，避免积累
+func (s *KeyService) DeleteBySecret(secret string) error {
+	if secret == "" {
+		return errors.New("empty key")
+	}
+	k, err := s.keys.FindBySecretHash(secret)
+	if err != nil {
+		sum := sha256.Sum256([]byte(secret))
+		hashed := hex.EncodeToString(sum[:])
+		k, err = s.keys.FindBySecretHash(hashed)
+		if err != nil {
+			return err
+		}
+	}
+	return s.keys.Delete(k.ID)
+}
+
 // HasPermission 判断用户是否拥有指定权限节点（精确匹配；通配在上层处理或扩展）
 func (s *KeyService) HasPermission(userID uint64, node string) bool {
 	list, err := s.perms.ListByUserID(userID)

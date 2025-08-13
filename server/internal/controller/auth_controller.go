@@ -113,16 +113,24 @@ func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg 
 		return
 	}
 
-	// 生成随机 secret，并创建绑定到 user 的密钥
+	// 生成随机 secret，并创建绑定到 user 的密钥（有效期上限 30 天）
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed to issue key")
 		return
 	}
 	secret := hex.EncodeToString(buf)
+	// 限制最大 30 天
+	maxExp := time.Now().Add(30 * 24 * time.Hour)
+	var finalExp *time.Time
+	if payload.ExpiresAt == nil || payload.ExpiresAt.After(maxExp) {
+		finalExp = &maxExp
+	} else {
+		finalExp = payload.ExpiresAt
+	}
 	bind := "user"
 	uid := user.ID
-	keyObj, err2 := c.keyService.CreateKey(user.ID, &bind, &uid, secret, payload.ExpiresAt, payload.MaxUses, nil)
+	keyObj, err2 := c.keyService.CreateKey(user.ID, &bind, &uid, secret, finalExp, payload.MaxUses, nil)
 	if err2 != nil {
 		s.SendErrorResponse(client, msg.ID, "failed to issue key")
 		return
@@ -144,6 +152,52 @@ func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg 
 		"user":        map[string]interface{}{"id": user.ID, "username": user.Username, "displayName": user.DisplayName},
 		"permissions": perms,
 	})
+}
+
+// HandleUserMe 返回当前 userKey 对应的用户信息与权限
+func (c *AuthController) HandleUserMe(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.permRepo == nil || c.userRepo == nil || c.keyService == nil {
+		s.SendErrorResponse(client, msg.ID, "not configured")
+		return
+	}
+	payload, _ := msg.Payload.(map[string]interface{})
+	userKey, _ := payload["userKey"].(string)
+	uid, _, err := c.keyService.PeekUserKey(userKey)
+	if err != nil {
+		s.SendErrorResponse(client, msg.ID, "invalid key")
+		return
+	}
+	u, err := c.userRepo.FindByID(uid)
+	if err != nil {
+		s.SendErrorResponse(client, msg.ID, "not found")
+		return
+	}
+	perms := []string{}
+	if list, err := c.permRepo.ListByUserID(uid); err == nil {
+		for _, p := range list {
+			perms = append(perms, p.Node)
+		}
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{
+		"success":     true,
+		"user":        map[string]interface{}{"id": u.ID, "username": u.Username, "displayName": u.DisplayName},
+		"permissions": perms,
+	})
+}
+
+// HandleUserLogout 撤销当前 userKey
+func (c *AuthController) HandleUserLogout(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	payload, _ := msg.Payload.(map[string]interface{})
+	userKey, _ := payload["userKey"].(string)
+	if userKey == "" {
+		s.SendErrorResponse(client, msg.ID, "invalid key")
+		return
+	}
+	if err := c.keyService.DeleteBySecret(userKey); err != nil {
+		s.SendErrorResponse(client, msg.ID, "failed")
+		return
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
 
 // HandleRegisterRequest 处理设备注册请求

@@ -111,6 +111,8 @@ func main() {
 	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)
 	server.RegisterRoute("register_request", authController.HandleRegisterRequest)
 	server.RegisterRoute("user_login", authController.HandleUserLogin)
+	server.RegisterRoute("user_me", authController.HandleUserMe)
+	server.RegisterRoute("user_logout", authController.HandleUserLogout)
 
 	server.Start() // 阻塞式启动
 }
