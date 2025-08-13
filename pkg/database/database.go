@@ -11,6 +11,10 @@ import (
 // DB 封装了数据库连接
 var DB *gorm.DB
 
+// 标记数据库或关键表是否在本次启动时新创建
+var WasDBCreated bool
+var WasUserTableCreated bool
+
 // createDBIfNotExist 检查数据库是否存在，如果不存在则创建。
 // 返回一个布尔值，指示是否创建了新数据库。
 func createDBIfNotExist(postgresDsn, dbName string) bool {
@@ -45,7 +49,7 @@ func createDBIfNotExist(postgresDsn, dbName string) bool {
 
 // InitDatabase 初始化数据库连接并运行迁移
 func InitDatabase(dsn, postgresDsn, dbName string) {
-	wasCreated := createDBIfNotExist(postgresDsn, dbName)
+	WasDBCreated = createDBIfNotExist(postgresDsn, dbName)
 
 	var err error
 	DB, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -57,11 +61,17 @@ func InitDatabase(dsn, postgresDsn, dbName string) {
 
 	// 每次启动都运行自动迁移，确保新模型就绪
 	log.Info().Msg("正在运行数据库迁移...")
+	// 迁移前记录 user 表是否存在
+	hadUserTable := DB.Migrator().HasTable(&User{})
 	err = DB.AutoMigrate(&Device{}, &DeviceVariable{}, &AccessPermission{}, &User{}, &Permission{}, &Key{}, &Grant{}, &AuditLog{})
 	if err != nil {
 		log.Fatal().Err(err).Msg("数据库迁移失败")
 	}
-	if wasCreated {
+	// 迁移后，如之前不存在而现在存在，标记为本次创建
+	hasUserTable := DB.Migrator().HasTable(&User{})
+	WasUserTableCreated = !hadUserTable && hasUserTable
+
+	if WasDBCreated {
 		log.Info().Msg("数据库首次创建并迁移完成")
 	} else {
 		log.Info().Msg("数据库迁移完成（已存在数据库）")

@@ -86,7 +86,7 @@ func main() {
 	server.RegisterRoute("user_perm_add", userController.HandleUserPermAdd)
 	server.RegisterRoute("user_perm_remove", userController.HandleUserPermRemove)
 
-	// 启动前：确保存在默认管理员并赋予所有权限
+	// 启动前：按策略初始化默认管理员
 	seedDefaultAdmin(userService, permRepo)
 	server.RegisterRoute("auth_request", authController.HandleAuthRequest)
 	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)
@@ -103,16 +103,21 @@ func seedDefaultAdmin(userSvc *service.UserService, permRepo *repository.Permiss
 		username = "admin"
 		password = "admin123!" // 建议首次登录后立即修改
 	}
-	// 是否已存在
+	// 根据用户要求：仅在本次启动新建数据库或用户表时自动创建/赋权；
+	// 若用户表已存在，则不做任何操作（不创建 admin，亦不赋权）。
+	if !(database.WasUserTableCreated || database.WasDBCreated) {
+		log.Info().Msg("检测到用户表已存在，跳过默认管理员创建与赋权")
+		return
+	}
+
+	// 全新安装场景：创建或修复默认管理员权限
 	if u, err := userSvc.GetByUsername(username); err == nil {
-		// 已存在则确保拥有所有权限节点
 		_ = permRepo.AddUserNode(u.ID, "admin.manage", nil)
 		_ = permRepo.AddUserNode(u.ID, "**", nil)
 		return
 	}
 	if u, err := userSvc.Create(username, "System Administrator", password); err == nil {
-		log.Info().Str("username", username).Msg("默认管理员已创建")
-		// 赋予所有权限
+		log.Info().Str("username", username).Msg("默认管理员已创建（新建用户表/数据库）")
 		_ = permRepo.AddUserNode(u.ID, "admin.manage", nil)
 		_ = permRepo.AddUserNode(u.ID, "**", nil)
 	}
