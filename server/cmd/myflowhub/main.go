@@ -94,6 +94,9 @@ func main() {
 	server.RegisterRoute("user_perm_list", userController.HandleUserPermList)
 	server.RegisterRoute("user_perm_add", userController.HandleUserPermAdd)
 	server.RegisterRoute("user_perm_remove", userController.HandleUserPermRemove)
+	// 普通用户自助：个人资料与修改密码
+	server.RegisterRoute("user_self_update", userController.HandleUserSelfUpdate)
+	server.RegisterRoute("user_self_password", userController.HandleUserSelfPassword)
 	// 密钥管理（按用户权限范围）
 	server.RegisterRoute("key_list", keyController.HandleKeyList)
 	server.RegisterRoute("key_create", keyController.HandleKeyCreate)

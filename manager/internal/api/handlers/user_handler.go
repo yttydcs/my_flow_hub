@@ -158,6 +158,50 @@ func (h *UserHandler) HandleRemoveUserPerm(w http.ResponseWriter, r *http.Reques
 	h.writeJSON(w, resp.Payload)
 }
 
+// 自助更新资料（仅自身）
+func (h *UserHandler) HandleSelfUpdate(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
+	var body struct{ DisplayName *string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	payload := map[string]interface{}{"userKey": token}
+	if body.DisplayName != nil {
+		payload["displayName"] = *body.DisplayName
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_self_update", Payload: payload}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+// 自助修改密码（校验旧密码）
+func (h *UserHandler) HandleSelfPassword(w http.ResponseWriter, r *http.Request) {
+	token := r.Header.Get("Authorization")
+	if len(token) > 7 && token[:7] == "Bearer " {
+		token = token[7:]
+	}
+	var body struct{ OldPassword, NewPassword string }
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_self_password", Payload: map[string]interface{}{"userKey": token, "oldPassword": body.OldPassword, "newPassword": body.NewPassword}}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
 func (h *UserHandler) writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)

@@ -57,3 +57,27 @@ func (s *UserService) Update(id uint64, displayName *string, password *string, d
 func (s *UserService) Delete(id uint64) error {
 	return s.repo.Delete(id)
 }
+
+// UpdateDisplayName 仅更新显示名
+func (s *UserService) UpdateDisplayName(id uint64, displayName string) error {
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	u.DisplayName = displayName
+	return s.repo.Update(u)
+}
+
+// ChangePasswordWithVerify 校验旧密码后更新密码
+func (s *UserService) ChangePasswordWithVerify(id uint64, oldPassword, newPassword string) error {
+	u, err := s.repo.FindByID(id)
+	if err != nil {
+		return err
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(oldPassword)); err != nil {
+		return err
+	}
+	hash, _ := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	u.PasswordHash = string(hash)
+	return s.repo.Update(u)
+}

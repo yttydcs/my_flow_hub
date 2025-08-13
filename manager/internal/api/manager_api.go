@@ -111,6 +111,11 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 		userHandler.HandleAddUserPerm(w, r)
 	case path == "users/perms/remove" && r.Method == "POST":
 		userHandler.HandleRemoveUserPerm(w, r)
+	// 自助资料与密码
+	case path == "profile" && r.Method == "PUT":
+		userHandler.HandleSelfUpdate(w, r)
+	case path == "profile/password" && r.Method == "PUT":
+		userHandler.HandleSelfPassword(w, r)
 	// 密钥管理
 	case path == "keys" && r.Method == "GET":
 		keyHandler.HandleListKeys(w, r)

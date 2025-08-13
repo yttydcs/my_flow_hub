@@ -240,3 +240,64 @@ PERM_REMOVE_OK:
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
+
+// HandleUserSelfUpdate 普通用户自助修改个人资料（仅自身，非管理员）
+func (c *UserController) HandleUserSelfUpdate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz == nil {
+		s.SendErrorResponse(client, msg.ID, "permission denied")
+		return
+	}
+	// 通过 userKey 解析当前用户ID
+	var userKey string
+	var displayName *string
+	if m, ok := msg.Payload.(map[string]interface{}); ok {
+		if uk, ok := m["userKey"].(string); ok {
+			userKey = uk
+		}
+		if dn, ok := m["displayName"].(string); ok {
+			displayName = &dn
+		}
+	}
+	uid, ok := c.authz.ResolveUserIDFromKey(userKey)
+	if !ok {
+		s.SendErrorResponse(client, msg.ID, "permission denied")
+		return
+	}
+	if displayName != nil {
+		if err := c.users.UpdateDisplayName(uid, *displayName); err != nil {
+			s.SendErrorResponse(client, msg.ID, "failed")
+			return
+		}
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
+}
+
+// HandleUserSelfPassword 普通用户自助修改密码（需提供旧密码进行校验）
+func (c *UserController) HandleUserSelfPassword(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+	if c.authz == nil {
+		s.SendErrorResponse(client, msg.ID, "permission denied")
+		return
+	}
+	var userKey, oldPwd, newPwd string
+	if m, ok := msg.Payload.(map[string]interface{}); ok {
+		if uk, ok := m["userKey"].(string); ok {
+			userKey = uk
+		}
+		if op, ok := m["oldPassword"].(string); ok {
+			oldPwd = op
+		}
+		if np, ok := m["newPassword"].(string); ok {
+			newPwd = np
+		}
+	}
+	uid, ok := c.authz.ResolveUserIDFromKey(userKey)
+	if !ok || oldPwd == "" || newPwd == "" {
+		s.SendErrorResponse(client, msg.ID, "invalid params")
+		return
+	}
+	if err := c.users.ChangePasswordWithVerify(uid, oldPwd, newPwd); err != nil {
+		s.SendErrorResponse(client, msg.ID, "invalid old password")
+		return
+	}
+	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
+}

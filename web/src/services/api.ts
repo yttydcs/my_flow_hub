@@ -142,6 +142,14 @@ class ApiService {
     return this.request('/users', { method: 'DELETE', body: JSON.stringify({ id }) })
   }
 
+  // 个人资料（自助）
+  async updateProfile(data: { displayName?: string }): Promise<ApiResponse> {
+    return this.request('/profile', { method: 'PUT', body: JSON.stringify(data) })
+  }
+  async changeMyPassword(oldPassword: string, newPassword: string): Promise<ApiResponse> {
+    return this.request('/profile/password', { method: 'PUT', body: JSON.stringify({ oldPassword, newPassword }) })
+  }
+
   // 用户权限管理
   async listUserPerms(userId: number): Promise<ApiResponse<string[]>> {
     return this.request<string[]>('/users/perms/list', { method: 'POST', body: JSON.stringify({ userId }) })

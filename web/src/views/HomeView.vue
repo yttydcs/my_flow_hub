@@ -110,12 +110,11 @@ const userMenuOptions = [
 const handleUserMenuSelect = (key: string) => {
   switch (key) {
     case 'profile':
-      // TODO: 打开个人资料页面
-      console.log('打开个人资料')
+      router.push('/profile')
       break
     case 'logout':
-      // TODO: 退出登录逻辑
-      console.log('退出登录')
+      auth.logout()
+      router.replace('/login')
       break
   }
 }
