@@ -103,6 +103,13 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 		userHandler.HandleUpdateUser(w, r)
 	case path == "users" && r.Method == "DELETE":
 		userHandler.HandleDeleteUser(w, r)
+	// 用户权限
+	case path == "users/perms/list" && r.Method == "POST":
+		userHandler.HandleListUserPerms(w, r)
+	case path == "users/perms/add" && r.Method == "POST":
+		userHandler.HandleAddUserPerm(w, r)
+	case path == "users/perms/remove" && r.Method == "POST":
+		userHandler.HandleRemoveUserPerm(w, r)
 	default:
 		api.writeError(w, http.StatusNotFound, "API endpoint not found")
 	}

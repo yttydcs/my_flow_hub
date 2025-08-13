@@ -74,6 +74,62 @@ func (h *UserHandler) HandleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, resp.Payload)
 }
 
+// 列出用户权限
+func (h *UserHandler) HandleListUserPerms(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID uint64 `json:"userId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_list", Payload: body}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+// 添加用户权限
+func (h *UserHandler) HandleAddUserPerm(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID uint64 `json:"userId"`
+		Node   string `json:"node"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_add", Payload: body}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
+// 移除用户权限
+func (h *UserHandler) HandleRemoveUserPerm(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		UserID uint64 `json:"userId"`
+		Node   string `json:"node"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		h.writeError(w, http.StatusBadRequest, "invalid body")
+		return
+	}
+	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_perm_remove", Payload: body}
+	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
+	if err != nil {
+		h.writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	h.writeJSON(w, resp.Payload)
+}
+
 func (h *UserHandler) writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)

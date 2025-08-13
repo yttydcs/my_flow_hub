@@ -141,6 +141,17 @@ class ApiService {
   async deleteUser(id: number): Promise<ApiResponse> {
     return this.request('/users', { method: 'DELETE', body: JSON.stringify({ id }) })
   }
+
+  // 用户权限管理
+  async listUserPerms(userId: number): Promise<ApiResponse<string[]>> {
+    return this.request<string[]>('/users/perms/list', { method: 'POST', body: JSON.stringify({ userId }) })
+  }
+  async addUserPerm(userId: number, node: string): Promise<ApiResponse> {
+    return this.request('/users/perms/add', { method: 'POST', body: JSON.stringify({ userId, node }) })
+  }
+  async removeUserPerm(userId: number, node: string): Promise<ApiResponse> {
+    return this.request('/users/perms/remove', { method: 'POST', body: JSON.stringify({ userId, node }) })
+  }
 }
 
 export const apiService = new ApiService()

@@ -51,7 +51,7 @@ func main() {
 	authController.SetSessionService(sessionService)
 	authController.SetPermissionRepository(permRepo)
 	_ = permService // reserved for future auth controller checks
-	userController := controller.NewUserController(userService, permService)
+	userController := controller.NewUserController(userService, permService, permRepo)
 
 	var server *hub.Server
 
@@ -81,6 +81,10 @@ func main() {
 	server.RegisterRoute("user_create", userController.HandleUserCreate)
 	server.RegisterRoute("user_update", userController.HandleUserUpdate)
 	server.RegisterRoute("user_delete", userController.HandleUserDelete)
+	// 用户权限管理（仅管理员）
+	server.RegisterRoute("user_perm_list", userController.HandleUserPermList)
+	server.RegisterRoute("user_perm_add", userController.HandleUserPermAdd)
+	server.RegisterRoute("user_perm_remove", userController.HandleUserPermRemove)
 
 	// 启动前：确保存在默认管理员并赋予所有权限
 	seedDefaultAdmin(userService, permRepo)

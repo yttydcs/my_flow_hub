@@ -8,7 +8,7 @@
       </n-space>
     </n-space>
 
-    <n-data-table :columns="columns" :data="users" :loading="loading" :bordered="false" />
+  <n-data-table :columns="columns" :data="users" :loading="loading" :bordered="false" />
 
     <!-- 创建/编辑用户弹窗 -->
     <n-modal v-model:show="showEdit" preset="dialog" :title="editing ? '编辑用户' : '新建用户'">
@@ -48,13 +48,36 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 编辑权限弹窗 -->
+    <n-modal v-model:show="showPerms" preset="dialog" title="编辑用户权限">
+      <n-space vertical>
+        <div>
+          <div style="margin-bottom: 8px; font-weight: 500;">当前权限节点</div>
+          <n-space wrap>
+            <n-tag v-for="node in permNodes" :key="node" closable @close="() => removePerm(node)">{{ node }}</n-tag>
+          </n-space>
+        </div>
+        <n-form :model="{ newNode }" label-placement="left" label-width="96">
+          <n-form-item label="新增节点">
+            <n-input v-model:value="newNode" placeholder="例如：admin.manage 或 devices.**.read" />
+          </n-form-item>
+          <n-button type="primary" @click="addPerm">添加</n-button>
+        </n-form>
+      </n-space>
+      <template #action>
+        <n-space>
+          <n-button @click="showPerms = false">关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
   
 </template>
 
 <script setup lang="ts">
 import { h, onMounted, reactive, ref } from 'vue'
-import { useMessage, NButton, NButtonGroup, NIcon } from 'naive-ui'
+import { useMessage, NButton, NButtonGroup, NIcon, NTag } from 'naive-ui'
 import {
   NH2, NSpace, NDataTable, NModal, NForm, NFormItem, NInput, NSwitch
 } from 'naive-ui'
@@ -75,16 +98,23 @@ const form = reactive<{ username: string; displayName?: string; password?: strin
 const showReset = ref(false)
 const resetForm = reactive<{ password: string }>({ password: '' })
 
+// 权限编辑状态
+const showPerms = ref(false)
+const permUserId = ref<number | null>(null)
+const permNodes = ref<string[]>([])
+const newNode = ref('')
+
 const columns = [
   { title: 'ID', key: 'ID', width: 80 },
   { title: '用户名', key: 'Username' },
   { title: '显示名', key: 'DisplayName' },
   { title: '状态', key: 'Disabled', render(row: User) { return row.Disabled ? '已禁用' : '启用' } },
   {
-    title: '操作', key: 'actions', width: 220, render(row: User) {
+    title: '操作', key: 'actions', width: 320, render(row: User) {
       return h(NButtonGroup, null, {
         default: () => [
           h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑', icon: () => h(NIcon, null, { default: () => h(PencilIcon) }) }),
+          h(NButton, { size: 'small', onClick: () => openPerms(row) }, { default: () => '编辑权限' }),
           h(NButton, { size: 'small', type: 'warning', onClick: () => openReset(row) }, { default: () => '重置密码', icon: () => h(NIcon, null, { default: () => h(KeyIcon) }) }),
           h(NButton, { size: 'small', type: 'error', onClick: () => delUser(row) }, { default: () => '删除', icon: () => h(NIcon, null, { default: () => h(TrashIcon) }) }),
         ]
@@ -173,6 +203,36 @@ async function delUser(row: User) {
   } catch (e) {
     message.error('网络错误')
   }
+}
+
+function openPerms(row: User) {
+  permUserId.value = row.ID
+  showPerms.value = true
+  loadPerms()
+}
+
+async function loadPerms() {
+  if (!permUserId.value) return
+  try {
+    const res = await apiService.listUserPerms(permUserId.value)
+    if (res.success) permNodes.value = (res.data as string[]) || []
+    else permNodes.value = []
+  } catch {
+    permNodes.value = []
+  }
+}
+
+async function addPerm() {
+  if (!permUserId.value || !newNode.value.trim()) return
+  const node = newNode.value.trim()
+  const res = await apiService.addUserPerm(permUserId.value, node)
+  if (res.success) { newNode.value = ''; loadPerms() }
+}
+
+async function removePerm(node: string) {
+  if (!permUserId.value) return
+  const res = await apiService.removeUserPerm(permUserId.value, node)
+  if (res.success) loadPerms()
 }
 
 onMounted(loadUsers)
