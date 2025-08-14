@@ -70,3 +70,41 @@ export interface Key {
   IssuedAt: string
   // SecretHash 与 Meta 通常不在列表中直接展示
 }
+
+// 审计日志类型
+export interface AuditLog {
+  ID: number
+  SubjectType: string
+  SubjectID?: number | null
+  Action: string
+  Resource: string
+  Decision: string
+  IP: string
+  UA: string
+  At: string
+  Extra?: any
+}
+
+export interface PagedAuditLogs {
+  Items: AuditLog[]
+  Total: number
+  Page: number
+  Size: number
+}
+
+// 系统日志类型
+export interface SystemLog {
+  ID: number
+  Level: 'info' | 'warn' | 'error' | string
+  Source: string
+  Message: string
+  Details?: any
+  At: string
+}
+
+export interface PagedSystemLogs {
+  Items: SystemLog[]
+  Total: number
+  Page: number
+  Size: number
+}

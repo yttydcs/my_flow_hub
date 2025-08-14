@@ -18,10 +18,12 @@ const (
 
 // Client is a middleman between the websocket connection and the hub.
 type Client struct {
-	Hub      *Server
-	Conn     *websocket.Conn
-	Send     chan []byte
-	DeviceID uint64
+	Hub        *Server
+	Conn       *websocket.Conn
+	Send       chan []byte
+	DeviceID   uint64
+	RemoteAddr string
+	UserAgent  string
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -82,7 +84,7 @@ func (s *Server) HandleSubordinateConnection(w http.ResponseWriter, r *http.Requ
 		log.Error().Err(err).Msg("Failed to upgrade connection")
 		return
 	}
-	client := &Client{Hub: s, Conn: conn, Send: make(chan []byte, 256), DeviceID: 0}
+	client := &Client{Hub: s, Conn: conn, Send: make(chan []byte, 256), DeviceID: 0, RemoteAddr: r.RemoteAddr, UserAgent: r.UserAgent()}
 	s.Register <- client
 
 	go client.writePump()

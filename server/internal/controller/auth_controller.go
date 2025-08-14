@@ -18,10 +18,11 @@ import (
 type AuthController struct {
 	authService   *service.AuthService
 	deviceService *service.DeviceService
-	perm          *service.PermissionService
 	permRepo      *repository.PermissionRepository
 	keyService    *service.KeyService
 	userRepo      *repository.UserRepository
+	audit         *service.AuditService
+	syslog        *service.SystemLogService
 }
 
 // NewAuthController 创建一个新的 AuthController
@@ -41,6 +42,10 @@ func (c *AuthController) SetPermissionRepository(p *repository.PermissionReposit
 // SetUserRepository 注入用户仓库，用于登录校验
 func (c *AuthController) SetUserRepository(u *repository.UserRepository) { c.userRepo = u }
 
+// SetAuditService 注入审计日志服务
+func (c *AuthController) SetAuditService(a *service.AuditService)         { c.audit = a }
+func (c *AuthController) SetSystemLogService(s *service.SystemLogService) { c.syslog = s }
+
 // HandleAuthRequest 处理常规设备认证请求
 func (c *AuthController) HandleAuthRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	var payload protocol.AuthRequestPayload
@@ -56,6 +61,10 @@ func (c *AuthController) HandleAuthRequest(s *hub.Server, client *hub.Client, ms
 	client.DeviceID = device.DeviceUID
 	s.Clients[client.DeviceID] = client
 	log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中认证成功并注册")
+	if c.syslog != nil {
+		_ = c.syslog.Info("device", "device authenticated",
+			map[string]any{"deviceUID": device.DeviceUID, "ip": client.RemoteAddr, "ua": client.UserAgent})
+	}
 
 	// 更新父级关系并同步变量
 	parentDevice, _ := c.deviceService.GetDeviceByUID(s.DeviceID)
@@ -145,6 +154,16 @@ func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg 
 			}
 		}
 	}
+	// 系统日志：登录成功
+	if c.syslog != nil {
+		_ = c.syslog.Info("auth", "user login",
+			map[string]any{"userId": user.ID, "username": user.Username, "ip": client.RemoteAddr, "ua": client.UserAgent})
+	}
+	// 审计：登录成功（保留但后续将独立功能）
+	if c.audit != nil {
+		uid := user.ID
+		_ = c.audit.Write("user", &uid, "user.login", user.Username, "allow", "", "", nil)
+	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{
 		"success":     true,
 		"token":       secret,
@@ -193,9 +212,23 @@ func (c *AuthController) HandleUserLogout(s *hub.Server, client *hub.Client, msg
 		s.SendErrorResponse(client, msg.ID, "invalid key")
 		return
 	}
+	// 先解析用户ID用于审计
+	var uidPtr *uint64
+	if c.keyService != nil {
+		if uid, _, err := c.keyService.PeekUserKey(userKey); err == nil && uid != 0 {
+			uidLocal := uid
+			uidPtr = &uidLocal
+		}
+	}
 	if err := c.keyService.DeleteBySecret(userKey); err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
+	}
+	if c.syslog != nil {
+		_ = c.syslog.Info("auth", "user logout", map[string]any{"userId": uidPtr, "ip": client.RemoteAddr, "ua": client.UserAgent})
+	}
+	if c.audit != nil { // 保留
+		_ = c.audit.Write("user", uidPtr, "user.logout", "", "allow", "", "", nil)
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
@@ -215,6 +248,10 @@ func (c *AuthController) HandleRegisterRequest(s *hub.Server, client *hub.Client
 	client.DeviceID = device.DeviceUID
 	s.Clients[client.DeviceID] = client
 	log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中注册成功并注册")
+	if c.syslog != nil {
+		_ = c.syslog.Info("device", "device registered",
+			map[string]any{"deviceUID": device.DeviceUID, "hardwareID": payload.HardwareID, "ip": client.RemoteAddr, "ua": client.UserAgent})
+	}
 
 	// 更新父级关系
 	parentDevice, _ := c.deviceService.GetDeviceByUID(s.DeviceID)

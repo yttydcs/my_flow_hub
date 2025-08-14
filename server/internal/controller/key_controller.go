@@ -13,12 +13,16 @@ import (
 )
 
 type KeyController struct {
-	keys *service.KeyService
+	keys  *service.KeyService
+	audit *service.AuditService
 }
 
 func NewKeyController(keys *service.KeyService) *KeyController {
 	return &KeyController{keys: keys}
 }
+
+// 可选注入审计服务
+func (c *KeyController) SetAuditService(a *service.AuditService) { c.audit = a }
 
 // HandleKeyList 按规则返回可见密钥列表
 func (c *KeyController) HandleKeyList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
@@ -88,6 +92,9 @@ func (c *KeyController) HandleKeyCreate(s *hub.Server, client *hub.Client, msg p
 			return
 		}
 	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &requesterID, "key.create", "", "allow", "", "", nil)
+	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": k, "secret": secret, "nodes": body.Nodes})
 }
 
@@ -116,6 +123,9 @@ func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg p
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &requesterID, "key.update", "", "allow", "", "", nil)
+	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
 
@@ -140,6 +150,9 @@ func (c *KeyController) HandleKeyDelete(s *hub.Server, client *hub.Client, msg p
 	if err := c.keys.DeleteKey(requesterID, body.ID); err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
+	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &requesterID, "key.delete", "", "allow", "", "", nil)
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }

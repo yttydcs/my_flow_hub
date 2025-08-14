@@ -55,7 +55,8 @@ const menuOptions = computed<MenuOption[]>(() => {
   { label: '密钥管理', key: 'manage-keys', icon: () => h(VariableIcon) }
   ]
   if (auth.isAdmin) base.push({ label: '用户管理', key: 'manage-users', icon: () => h(UsersIcon) })
-  base.push({ label: '日志管理', key: 'manage-logs', icon: () => h(LogsIcon) })
+  const canViewLogs = auth.isAdmin || auth.permissions.includes('log.read')
+  if (canViewLogs) base.push({ label: '日志管理', key: 'manage-logs', icon: () => h(LogsIcon) })
   return base
 })
 

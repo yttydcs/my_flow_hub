@@ -1,4 +1,4 @@
-import type { ApiResponse, DeviceTreeNode, DeviceVariable, Key, Device } from '@/types/api'
+import type { ApiResponse, DeviceTreeNode, DeviceVariable, Key, Device, PagedSystemLogs } from '@/types/api'
 import type { User } from '@/types/api'
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8090/api'
@@ -188,6 +188,12 @@ class ApiService {
   // 可见设备（用于创钥时提供设备选项）
   async getKeyDevices(): Promise<ApiResponse<Device[]>> {
     return this.request<Device[]>('/keys/devices', { method: 'GET' })
+  }
+
+  // ===== 日志 =====
+  async getLogs(params: { keyword?: string; level?: string; source?: string; startAt?: number; endAt?: number; page?: number; pageSize?: number } = {}): Promise<ApiResponse<PagedSystemLogs>> {
+    // 使用 POST 方便传较多筛选项
+    return this.request<PagedSystemLogs>('/logs', { method: 'POST', body: JSON.stringify(params) })
   }
 }
 

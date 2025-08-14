@@ -13,6 +13,7 @@ type DeviceController struct {
 	service *service.DeviceService
 	perm    *service.PermissionService
 	authz   *service.AuthzService
+	syslog  *service.SystemLogService
 }
 
 // NewDeviceController 创建一个新的 DeviceController
@@ -21,7 +22,8 @@ func NewDeviceController(service *service.DeviceService, perm *service.Permissio
 }
 
 // SetAuthzService 可选注入统一授权服务
-func (c *DeviceController) SetAuthzService(a *service.AuthzService) { c.authz = a }
+func (c *DeviceController) SetAuthzService(a *service.AuthzService)         { c.authz = a }
+func (c *DeviceController) SetSystemLogService(s *service.SystemLogService) { c.syslog = s }
 
 // HandleQueryNodes 处理节点查询请求
 func (c *DeviceController) HandleQueryNodes(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
@@ -116,6 +118,9 @@ CREATE_OK:
 	if err := c.service.CreateDevice(&payload); err != nil {
 		s.SendErrorResponse(client, msg.ID, "Failed to create device")
 		return
+	}
+	if c.syslog != nil {
+		_ = c.syslog.Info("device", "device created", map[string]any{"deviceUID": payload.DeviceUID, "name": payload.Name, "by": client.DeviceID})
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
@@ -220,6 +225,9 @@ DELETE_OK:
 	if err := c.service.DeleteDevice(id); err != nil {
 		s.SendErrorResponse(client, msg.ID, "Failed to delete device")
 		return
+	}
+	if c.syslog != nil {
+		_ = c.syslog.Info("device", "device deleted", map[string]any{"id": id, "by": client.DeviceID})
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }

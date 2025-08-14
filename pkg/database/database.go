@@ -63,7 +63,7 @@ func InitDatabase(dsn, postgresDsn, dbName string) {
 	log.Info().Msg("正在运行数据库迁移...")
 	// 迁移前记录 user 表是否存在
 	hadUserTable := DB.Migrator().HasTable(&User{})
-	err = DB.AutoMigrate(&Device{}, &DeviceVariable{}, &AccessPermission{}, &User{}, &Permission{}, &Key{}, &Grant{}, &AuditLog{})
+	err = DB.AutoMigrate(&Device{}, &DeviceVariable{}, &AccessPermission{}, &User{}, &Permission{}, &Key{}, &Grant{}, &AuditLog{}, &SystemLog{})
 	if err != nil {
 		log.Fatal().Err(err).Msg("数据库迁移失败")
 	}

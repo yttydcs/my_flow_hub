@@ -1,3 +1,12 @@
+## 日志（审计）
+
+Manager API
+- GET/POST /api/logs 获取审计日志，支持筛选：keyword, subjectType, decision, action, startAt, endAt, page, pageSize。
+	- 需要权限：log.read 或 admin.manage。
+
+Hub 消息
+- log_list：同上，payload 附带 userKey。
+
 # 文档索引
 
 - 顶层 README：项目概览、运行方式与权限说明（README.md）

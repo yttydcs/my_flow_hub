@@ -35,6 +35,8 @@ func main() {
 	userRepo := repository.NewUserRepository(database.DB)
 	permRepo := repository.NewPermissionRepository(database.DB)
 	keyRepo := repository.NewKeyRepository(database.DB)
+	auditRepo := repository.NewAuditLogRepository(database.DB)
+	systemLogRepo := repository.NewSystemLogRepository(database.DB)
 
 	// 初始化 service
 	deviceService := service.NewDeviceService(deviceRepo, variableRepo, database.DB)
@@ -43,6 +45,8 @@ func main() {
 	permService := service.NewPermissionService(deviceRepo)
 	userService := service.NewUserService(userRepo)
 	keyService := service.NewKeyService(keyRepo, permRepo, deviceRepo)
+	auditService := service.NewAuditService(auditRepo, keyService)
+	systemLogService := service.NewSystemLogService(systemLogRepo)
 	authzService := service.NewAuthzService(keyService, deviceRepo, permRepo)
 
 	// 初始化 controller
@@ -57,10 +61,19 @@ func main() {
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService, permRepo)
 	keyController := controller.NewKeyController(keyService)
+	logController := controller.NewLogController(auditService)
+	systemLogController := controller.NewSystemLogController(systemLogService)
 	// 将统一授权服务注入设备与变量控制器
 	deviceController.SetAuthzService(authzService)
+	deviceController.SetSystemLogService(systemLogService)
 	variableController.SetAuthzService(authzService)
 	userController.SetAuthzService(authzService)
+	userController.SetAuditService(auditService)
+	logController.SetAuthzService(authzService)
+	systemLogController.SetAuthzService(authzService)
+	keyController.SetAuditService(auditService)
+	authController.SetAuditService(auditService)
+	authController.SetSystemLogService(systemLogService)
 
 	var server *hub.Server
 
@@ -75,6 +88,9 @@ func main() {
 		log.Info().Msg("以中枢模式启动...")
 		server = hub.NewServer("", serverConf.ListenAddr, serverConf.HardwareID)
 	}
+
+	// 注入系统日志服务到 hub（用于连接/断开等事件记录）
+	server.Syslog = systemLogService
 
 	// 注册路由
 	server.RegisterRoute("query_nodes", deviceController.HandleQueryNodes)
@@ -104,6 +120,8 @@ func main() {
 	server.RegisterRoute("key_delete", keyController.HandleKeyDelete)
 	// 密钥创建辅助：可见设备列表
 	server.RegisterRoute("key_devices", keyController.HandleKeyDevices)
+	// 系统日志查询（需 log.read/admin）
+	server.RegisterRoute("systemlog_list", systemLogController.HandleSystemLogList)
 
 	// 启动前：按策略初始化默认管理员
 	seedDefaultAdmin(userService, permRepo)

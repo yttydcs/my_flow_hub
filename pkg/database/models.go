@@ -121,3 +121,13 @@ type AuditLog struct {
 	At          time.Time `gorm:"index"`
 	Extra       datatypes.JSON
 }
+
+// SystemLog 系统日志：记录系统级信息/错误；详细信息统一放入 Details(JSON)
+type SystemLog struct {
+	ID      uint64         `gorm:"primaryKey"`
+	Level   string         `gorm:"size:20;index"`  // info | warn | error
+	Source  string         `gorm:"size:100;index"` // 模块/组件来源
+	Message string         `gorm:"size:512"`
+	Details datatypes.JSON // 任意结构：可包含 ip/ua/stack 等
+	At      time.Time      `gorm:"index"`
+}

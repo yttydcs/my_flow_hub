@@ -55,6 +55,7 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 	variableHandler := handlers.NewVariableHandler(api.hubClient)
 	userHandler := handlers.NewUserHandler(api.hubClient)
 	keyHandler := handlers.NewKeyHandler(api.hubClient)
+	logHandler := handlers.NewLogHandler(api.hubClient)
 
 	// 简单鉴权：除登录外的接口都需要 Authorization: Bearer <token>
 	if path != "auth/login" {
@@ -131,6 +132,9 @@ func (api *ManagerAPI) handleAPI(w http.ResponseWriter, r *http.Request) {
 		keyHandler.HandleDeleteKey(w, r)
 	case path == "keys/devices" && r.Method == "GET":
 		keyHandler.HandleKeyDevices(w, r)
+	// 日志
+	case path == "logs" && (r.Method == "GET" || r.Method == "POST"):
+		logHandler.HandleList(w, r)
 	default:
 		api.writeError(w, http.StatusNotFound, "API endpoint not found")
 	}

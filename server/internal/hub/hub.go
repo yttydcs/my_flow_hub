@@ -5,6 +5,7 @@ import (
 	"myflowhub/pkg/protocol"
 	"net/http"
 	"regexp"
+	"runtime/debug"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,6 +34,10 @@ type Server struct {
 	Register   chan *Client
 	Unregister chan *Client
 	router     *Router
+	Syslog     interface {
+		Info(source, message string, details any) error
+		Error(source, message string, details any) error
+	} // updated interface to include Error method
 }
 
 // isValidVarName 检查变量名是否有效
@@ -62,14 +67,20 @@ func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
 func (s *Server) Run() {
 	for {
 		select {
-		case <-s.Register:
+		case c := <-s.Register:
 			log.Info().Msg("一个新客户端已连接，等待认证...")
+			if s.Syslog != nil {
+				_ = s.Syslog.Info("hub", "client connected", map[string]any{"ip": c.RemoteAddr, "ua": c.UserAgent})
+			}
 		case client := <-s.Unregister:
 			if client.DeviceID != 0 {
 				if _, ok := s.Clients[client.DeviceID]; ok {
 					delete(s.Clients, client.DeviceID)
 					close(client.Send)
 					log.Info().Uint64("clientID", client.DeviceID).Int("total_clients", len(s.Clients)).Msg("客户端已从 Hub 注销")
+					if s.Syslog != nil {
+						_ = s.Syslog.Info("hub", "client disconnected", map[string]any{"deviceUID": client.DeviceID, "ip": client.RemoteAddr, "ua": client.UserAgent})
+					}
 				}
 			}
 		case hubMessage := <-s.Broadcast:
@@ -199,6 +210,16 @@ func (s *Server) SendResponse(client *Client, originalID string, payload map[str
 
 // SendErrorResponse 发送一个错误响应
 func (s *Server) SendErrorResponse(client *Client, originalID, errorMsg string) {
+	if s.Syslog != nil {
+		_ = s.Syslog.Error("controller", "error response", map[string]any{
+			"error":      errorMsg,
+			"originalId": originalID,
+			"deviceUID":  client.DeviceID,
+			"ip":         client.RemoteAddr,
+			"ua":         client.UserAgent,
+			"stack":      string(debug.Stack()),
+		})
+	}
 	s.SendResponse(client, originalID, map[string]interface{}{
 		"success": false,
 		"error":   errorMsg,

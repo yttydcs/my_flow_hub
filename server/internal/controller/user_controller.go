@@ -13,6 +13,7 @@ type UserController struct {
 	perm      *service.PermissionService
 	permsRepo *repository.PermissionRepository
 	authz     *service.AuthzService
+	audit     *service.AuditService
 }
 
 func NewUserController(users *service.UserService, perm *service.PermissionService, permsRepo *repository.PermissionRepository) *UserController {
@@ -21,6 +22,9 @@ func NewUserController(users *service.UserService, perm *service.PermissionServi
 
 // SetAuthzService 可选注入统一授权服务
 func (c *UserController) SetAuthzService(a *service.AuthzService) { c.authz = a }
+
+// 可选注入审计服务
+func (c *UserController) SetAuditService(a *service.AuditService) { c.audit = a }
 
 func (c *UserController) HandleUserList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
 	// 优先使用 userKey 判定是否具备 admin.manage；否则退回设备是否为管理员
@@ -73,6 +77,9 @@ CREATE_OK:
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", nil, "user.create", payload.Username, "allow", "", "", nil)
+	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": u})
 }
 
@@ -105,6 +112,9 @@ UPDATE_OK:
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
 	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &payload.ID, "user.update", "", "allow", "", "", nil)
+	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
 
@@ -131,6 +141,9 @@ DELETE_OK:
 	if err := c.users.Delete(payload.ID); err != nil {
 		s.SendErrorResponse(client, msg.ID, "failed")
 		return
+	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &payload.ID, "user.delete", "", "allow", "", "", nil)
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
@@ -269,6 +282,9 @@ func (c *UserController) HandleUserSelfUpdate(s *hub.Server, client *hub.Client,
 			return
 		}
 	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &uid, "user.self_update", "", "allow", "", "", nil)
+	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
 
@@ -298,6 +314,9 @@ func (c *UserController) HandleUserSelfPassword(s *hub.Server, client *hub.Clien
 	if err := c.users.ChangePasswordWithVerify(uid, oldPwd, newPwd); err != nil {
 		s.SendErrorResponse(client, msg.ID, "invalid old password")
 		return
+	}
+	if c.audit != nil {
+		_ = c.audit.Write("user", &uid, "user.change_password", "", "allow", "", "", nil)
 	}
 	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
 }
