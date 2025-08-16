@@ -68,3 +68,28 @@ func RegisterSystemLogRoutes(s *hub.Server, keyService *service.KeyService, auth
 	slb := &controller.SystemLogBin{C: sc}
 	s.RegisterBinRoute(binproto.TypeSystemLogListReq, slb.List)
 }
+
+// RegisterUserRoutes wires user management routes (admin + self operations).
+func RegisterUserRoutes(s *hub.Server, userService *service.UserService, permService *service.PermissionService, permRepo *repository.PermissionRepository, authzService *service.AuthzService) {
+	uc := controller.NewUserController(userService, permService, permRepo)
+	uc.SetAuthzService(authzService)
+	ub := &controller.UserBin{Users: uc}
+	// Admin
+	s.RegisterBinRoute(binproto.TypeUserListReq, ub.List)
+	s.RegisterBinRoute(binproto.TypeUserCreateReq, ub.Create)
+	s.RegisterBinRoute(binproto.TypeUserUpdateReq, ub.Update)
+	s.RegisterBinRoute(binproto.TypeUserDeleteReq, ub.Delete)
+	s.RegisterBinRoute(binproto.TypeUserPermListReq, ub.PermList)
+	s.RegisterBinRoute(binproto.TypeUserPermAddReq, ub.PermAdd)
+	s.RegisterBinRoute(binproto.TypeUserPermRemoveReq, ub.PermRemove)
+	// Self
+	s.RegisterBinRoute(binproto.TypeUserSelfUpdateReq, ub.SelfUpdate)
+	s.RegisterBinRoute(binproto.TypeUserSelfPasswordReq, ub.SelfPassword)
+}
+
+// RegisterParentAuth 路由
+func RegisterParentAuth(s *hub.Server) {
+	pc := controller.NewParentAuthController()
+	pb := &controller.ParentAuthBin{C: pc}
+	s.RegisterBinRoute(binproto.TypeParentAuthReq, pb.Handle)
+}

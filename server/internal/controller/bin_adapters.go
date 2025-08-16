@@ -14,10 +14,12 @@ type AuthBin struct{ C *AuthController }
 func (a *AuthBin) ManagerAuth(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
 	token, err := binproto.DecodeManagerAuthReq(payload)
 	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
 		return
 	}
 	deviceUID, role, err := a.C.AuthenticateManagerToken(token)
 	if err != nil {
+		sendErr(s, c, h, 401, "unauthorized")
 		return
 	}
 	c.DeviceID = deviceUID
@@ -29,10 +31,12 @@ func (a *AuthBin) ManagerAuth(s *hub.Server, c *hub.Client, h binproto.HeaderV1,
 func (a *AuthBin) UserLogin(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
 	username, password, err := binproto.DecodeUserLoginReq(payload)
 	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
 		return
 	}
 	keyID, userID, secret, uname, displayName, perms, err := a.C.Login(username, password)
 	if err != nil {
+		sendErr(s, c, h, 401, "invalid credentials")
 		return
 	}
 	pl := binproto.EncodeUserLoginResp(h.MsgID, keyID, userID, secret, uname, displayName, perms)
@@ -42,10 +46,12 @@ func (a *AuthBin) UserLogin(s *hub.Server, c *hub.Client, h binproto.HeaderV1, p
 func (a *AuthBin) UserMe(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
 	userKey, err := binproto.DecodeUserMeReq(payload)
 	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
 		return
 	}
 	uid, uname, displayName, perms, err := a.C.Me(userKey)
 	if err != nil {
+		sendErr(s, c, h, 401, "invalid key")
 		return
 	}
 	pl := binproto.EncodeUserMeResp(h.MsgID, uid, uname, displayName, perms)
@@ -55,9 +61,13 @@ func (a *AuthBin) UserMe(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payl
 func (a *AuthBin) UserLogout(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
 	userKey, err := binproto.DecodeUserLogoutReq(payload)
 	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	_ = a.C.Logout(userKey)
+	if e := a.C.Logout(userKey); e != nil {
+		sendErr(s, c, h, 400, "logout failed")
+		return
+	}
 	sendOK(s, c, h, 0, "ok")
 }
 
@@ -147,6 +157,7 @@ func (d *DeviceBin) Update(s *hub.Server, c *hub.Client, h binproto.HeaderV1, pa
 func (d *DeviceBin) Delete(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
 	id, uk, err := binproto.DecodeDeleteDeviceReq(payload)
 	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
 		return
 	}
 	if e := d.C.DeleteDevice(uk, id, c.DeviceID); e != nil {
@@ -429,4 +440,180 @@ func (slog *SystemLogBin) List(s *hub.Server, c *hub.Client, h binproto.HeaderV1
 	}
 	pl := binproto.EncodeSystemLogListResp(h.MsgID, out.Total, int32(out.Page), int32(out.Size), items)
 	sendFrame(s, c, h, binproto.TypeSystemLogListResp, pl)
+}
+
+// ========== Users Management ==========
+type UserBin struct{ Users *UserController }
+
+func (ub *UserBin) List(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	// 要求管理员权限：通过用户密钥判断
+	userKey, _ := binproto.DecodeUserMeReq(payload) // 复用 user_key 解码
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	list, err := ub.Users.users.List()
+	if err != nil {
+		sendErr(s, c, h, 500, "list failed")
+		return
+	}
+	items := make([]binproto.UserItem, 0, len(list))
+	for _, u := range list {
+		items = append(items, binproto.UserItem{ID: u.ID, Username: u.Username, DisplayName: u.DisplayName, Disabled: u.Disabled, CreatedAtSec: u.CreatedAt.Unix(), UpdatedAtSec: u.UpdatedAt.Unix()})
+	}
+	pl := binproto.EncodeUserListResp(h.MsgID, items)
+	sendFrame(s, c, h, binproto.TypeUserListResp, pl)
+}
+
+func (ub *UserBin) Create(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, username, displayName, password, err := binproto.DecodeUserCreateReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	u, e := ub.Users.users.Create(username, displayName, password)
+	if e != nil {
+		sendErr(s, c, h, 500, "create failed")
+		return
+	}
+	pl := binproto.EncodeUserCreateResp(h.MsgID, u.ID)
+	sendFrame(s, c, h, binproto.TypeUserCreateResp, pl)
+}
+
+func (ub *UserBin) Update(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, id, displayName, password, disabled, err := binproto.DecodeUserUpdateReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	if e := ub.Users.users.Update(id, displayName, password, disabled); e != nil {
+		sendErr(s, c, h, 500, "update failed")
+		return
+	}
+	sendOK(s, c, h, 0, "ok")
+}
+
+func (ub *UserBin) Delete(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, id, err := binproto.DecodeUserDeleteReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	if e := ub.Users.users.Delete(id); e != nil {
+		sendErr(s, c, h, 500, "delete failed")
+		return
+	}
+	sendOK(s, c, h, 0, "ok")
+}
+
+func (ub *UserBin) PermList(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, targetID, err := binproto.DecodeUserPermListReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	ps, e := ub.Users.permsRepo.ListByUserID(targetID)
+	if e != nil {
+		sendErr(s, c, h, 500, "query failed")
+		return
+	}
+	items := make([]binproto.PermissionItem, 0, len(ps))
+	for _, p := range ps {
+		items = append(items, binproto.PermissionItem{Node: p.Node})
+	}
+	pl := binproto.EncodeUserPermListResp(h.MsgID, items)
+	sendFrame(s, c, h, binproto.TypeUserPermListResp, pl)
+}
+
+func (ub *UserBin) PermAdd(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, targetID, node, err := binproto.DecodeUserPermAddReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	if e := ub.Users.permsRepo.AddUserNode(targetID, node, &uid); e != nil {
+		sendErr(s, c, h, 500, "add failed")
+		return
+	}
+	sendOK(s, c, h, 0, "ok")
+}
+
+func (ub *UserBin) PermRemove(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, targetID, node, err := binproto.DecodeUserPermRemoveReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
+		sendErr(s, c, h, 403, "permission denied")
+		return
+	}
+	if e := ub.Users.permsRepo.RemoveUserNode(targetID, node); e != nil {
+		sendErr(s, c, h, 500, "remove failed")
+		return
+	}
+	sendOK(s, c, h, 0, "ok")
+}
+
+func (ub *UserBin) SelfUpdate(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, displayName, err := binproto.DecodeUserSelfUpdateReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok {
+		sendErr(s, c, h, 401, "unauthorized")
+		return
+	}
+	if e := ub.Users.users.UpdateDisplayName(uid, displayName); e != nil {
+		sendErr(s, c, h, 500, "update failed")
+		return
+	}
+	sendOK(s, c, h, 0, "ok")
+}
+
+func (ub *UserBin) SelfPassword(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
+	userKey, oldPassword, newPassword, err := binproto.DecodeUserSelfPasswordReq(payload)
+	if err != nil {
+		sendErr(s, c, h, 400, "bad request")
+		return
+	}
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok {
+		sendErr(s, c, h, 401, "unauthorized")
+		return
+	}
+	if e := ub.Users.users.ChangePasswordWithVerify(uid, oldPassword, newPassword); e != nil {
+		sendErr(s, c, h, 400, "change failed")
+		return
+	}
+	sendOK(s, c, h, 0, "ok")
 }

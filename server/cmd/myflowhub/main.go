@@ -103,6 +103,8 @@ func main() {
 	binroutes.RegisterVariableRoutes(server, variableService, deviceService, permService, authzService)
 	binroutes.RegisterKeyRoutes(server, keyService, permService)
 	binroutes.RegisterKeyDevicesRoute(server, keyService)
+	binroutes.RegisterUserRoutes(server, userService, permService, permRepo, authzService)
+	binroutes.RegisterParentAuth(server)
 
 	server.Start() // 阻塞式启动
 }

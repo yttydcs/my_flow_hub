@@ -57,9 +57,18 @@ func (s *AuthService) AuthenticateManager(token string) (*database.Device, bool)
 			if err := s.deviceRepo.Create(newManagerDevice); err != nil {
 				return nil, false
 			}
+			if newManagerDevice.DeviceUID == 0 {
+				// 确保有非零 UID（某些数据库/迁移环境可能未自动分配）
+				newManagerDevice.DeviceUID = 10001
+				_ = s.deviceRepo.Update(newManagerDevice)
+			}
 			return newManagerDevice, true
 		}
 		return nil, false
+	}
+	if managerDevice.DeviceUID == 0 {
+		managerDevice.DeviceUID = 10001
+		_ = s.deviceRepo.Update(managerDevice)
 	}
 	return managerDevice, true
 }

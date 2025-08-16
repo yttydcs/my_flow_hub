@@ -20,6 +20,7 @@ type Config struct {
 		ListenAddr   string `json:"ListenAddr"`
 		HardwareID   string `json:"HardwareID"`
 		ManagerToken string `json:"ManagerToken"`
+		RelayToken   string `json:"RelayToken"`
 		DefaultAdmin struct {
 			Username string `json:"Username"`
 			Password string `json:"Password"`
@@ -29,10 +30,11 @@ type Config struct {
 		Address string `json:"Address"`
 	} `json:"Hub"`
 	Relay struct {
-		Enabled    bool   `json:"Enabled"`
-		ParentAddr string `json:"ParentAddr"`
-		ListenAddr string `json:"ListenAddr"`
-		HardwareID string `json:"HardwareID"`
+		Enabled     bool   `json:"Enabled"`
+		ParentAddr  string `json:"ParentAddr"`
+		ListenAddr  string `json:"ListenAddr"`
+		HardwareID  string `json:"HardwareID"`
+		SharedToken string `json:"SharedToken"`
 	} `json:"Relay"`
 }
 

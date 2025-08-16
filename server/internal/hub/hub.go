@@ -4,6 +4,7 @@ import (
 	bin "myflowhub/pkg/protocol/binproto"
 	"net/http"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -36,6 +37,10 @@ type Server struct {
 		Info(source, message string, details any) error
 		Error(source, message string, details any) error
 	} // updated interface to include Error method
+
+	// nonce cache for future ParentAuth anti-replay (reserved)
+	nonces   map[string]int64
+	noncesMu sync.Mutex
 }
 
 // isValidVarName 检查变量名是否有效
@@ -56,6 +61,7 @@ func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
 		binRoutes:  make(map[uint16]func(*Server, *Client, bin.HeaderV1, []byte)),
+		nonces:     make(map[string]int64),
 	}
 	return s
 }
@@ -103,6 +109,8 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 		switch h.TypeID {
 		case bin.TypeManagerAuthReq:
 			log.Warn().Msg("未注册 ManagerAuth 二进制处理器")
+		case bin.TypeParentAuthReq:
+			log.Warn().Msg("未注册 ParentAuth 二进制处理器（应由 binroutes 注册）")
 		case bin.TypeMsgSend:
 			// 透传：当 Target ≠ Hub
 			if h.Target != s.DeviceID && h.Target != 0 {

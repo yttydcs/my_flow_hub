@@ -49,7 +49,11 @@ func (c *AuthController) AuthenticateManagerToken(token string) (deviceUID uint6
 	if !ok {
 		return 0, "", fmt.Errorf("unauthorized")
 	}
-	return device.DeviceUID, "manager", nil
+	// 某些初始化路径下 DeviceUID 可能仍为 0，回退使用数据库 ID 以保证非 0
+	if device.DeviceUID != 0 {
+		return device.DeviceUID, "manager", nil
+	}
+	return device.ID, "manager", nil
 }
 
 // Login: 用户登录，返回一次性 userKey 与权限

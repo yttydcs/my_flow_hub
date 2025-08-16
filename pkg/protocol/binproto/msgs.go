@@ -26,6 +26,12 @@ const (
 	TypeSystemLogListResp uint16 = 151
 )
 
+// ========== Parent Link Auth ==========
+const (
+	TypeParentAuthReq  uint16 = 130
+	TypeParentAuthResp uint16 = 131
+)
+
 // ========== Keys Management ==========
 const (
 	TypeKeyListReq     uint16 = 170
@@ -36,6 +42,25 @@ const (
 	TypeKeyDeleteReq   uint16 = 175
 	TypeKeyDevicesReq  uint16 = 176
 	TypeKeyDevicesResp uint16 = 177
+)
+
+// ========== Users Management (Admin + Self) ==========
+const (
+	// Admin-side user CRUD
+	TypeUserListReq    uint16 = 180
+	TypeUserListResp   uint16 = 181
+	TypeUserCreateReq  uint16 = 182
+	TypeUserCreateResp uint16 = 183
+	TypeUserUpdateReq  uint16 = 184
+	TypeUserDeleteReq  uint16 = 185
+	// User permissions (nodes)
+	TypeUserPermListReq   uint16 = 186
+	TypeUserPermListResp  uint16 = 187
+	TypeUserPermAddReq    uint16 = 188
+	TypeUserPermRemoveReq uint16 = 189
+	// Self-service
+	TypeUserSelfUpdateReq   uint16 = 190
+	TypeUserSelfPasswordReq uint16 = 191
 )
 
 // EncodeOKResp encodes {request_id:u64, code:i32, message:len16+utf8}
@@ -145,6 +170,648 @@ func DecodeManagerAuthResp(b []byte) (reqID, deviceUID uint64, role string, err 
 		}
 	}
 	return
+}
+
+// ParentAuthReq: {version:u8, ts:i64(ms), nonce:16B, hardware_id:len16+str, caps:len16+str, sig:32B}
+func EncodeParentAuthReq(version uint8, ts int64, nonce [16]byte, hardwareID, caps string, sig [32]byte) []byte {
+	w := NewWriter(128)
+	w.WriteBytes([]byte{version})
+	w.WriteI64(ts)
+	w.WriteBytes(nonce[:])
+	hb := []byte(hardwareID)
+	w.WriteLen16(len(hb))
+	w.WriteBytes(hb)
+	cb := []byte(caps)
+	w.WriteLen16(len(cb))
+	w.WriteBytes(cb)
+	w.WriteBytes(sig[:])
+	return w.Bytes()
+}
+
+func DecodeParentAuthReq(b []byte) (version uint8, ts int64, nonce [16]byte, hardwareID, caps string, sig [32]byte, err error) {
+	r := NewReader(b)
+	if bb, e := r.Read(1); e != nil {
+		err = e
+		return
+	} else {
+		version = bb[0]
+	}
+	if v, e := r.ReadI64(); e != nil {
+		err = e
+		return
+	} else {
+		ts = v
+	}
+	if nb, e := r.Read(16); e != nil {
+		err = e
+		return
+	} else {
+		copy(nonce[:], nb)
+	}
+	ln, e := r.ReadLen16()
+	if e != nil {
+		err = e
+		return
+	}
+	hb, e := r.Read(ln)
+	if e != nil {
+		err = e
+		return
+	}
+	hardwareID = string(hb)
+	ln, e = r.ReadLen16()
+	if e != nil {
+		err = e
+		return
+	}
+	cb, e := r.Read(ln)
+	if e != nil {
+		err = e
+		return
+	}
+	caps = string(cb)
+	if sb, e := r.Read(32); e != nil {
+		err = e
+		return
+	} else {
+		copy(sig[:], sb)
+	}
+	return
+}
+
+// ParentAuthResp: {request_id:u64, device_uid:u64, session_id:16B, heartbeat_sec:u16, perms:[len16+str], exp:i64, sig:32B}
+func EncodeParentAuthResp(requestID, deviceUID uint64, sessionID [16]byte, heartbeatSec uint16, perms []string, exp int64, sig [32]byte) []byte {
+	w := NewWriter(128)
+	w.WriteU64(requestID)
+	w.WriteU64(deviceUID)
+	w.WriteBytes(sessionID[:])
+	w.WriteU16(heartbeatSec)
+	w.WriteU16(uint16(len(perms)))
+	for _, p := range perms {
+		pb := []byte(p)
+		w.WriteLen16(len(pb))
+		w.WriteBytes(pb)
+	}
+	w.WriteI64(exp)
+	w.WriteBytes(sig[:])
+	return w.Bytes()
+}
+
+func DecodeParentAuthResp(b []byte) (requestID, deviceUID uint64, sessionID [16]byte, heartbeatSec uint16, perms []string, exp int64, sig [32]byte, err error) {
+	r := NewReader(b)
+	if v, e := r.ReadU64(); e != nil {
+		err = e
+		return
+	} else {
+		requestID = v
+	}
+	if v, e := r.ReadU64(); e != nil {
+		err = e
+		return
+	} else {
+		deviceUID = v
+	}
+	if sb, e := r.Read(16); e != nil {
+		err = e
+		return
+	} else {
+		copy(sessionID[:], sb)
+	}
+	if v, e := r.ReadU16(); e != nil {
+		err = e
+		return
+	} else {
+		heartbeatSec = v
+	}
+	n, e := r.ReadU16()
+	if e != nil {
+		err = e
+		return
+	}
+	perms = make([]string, 0, int(n))
+	for i := 0; i < int(n); i++ {
+		ln, e := r.ReadLen16()
+		if e != nil {
+			err = e
+			return
+		}
+		pb, e := r.Read(ln)
+		if e != nil {
+			err = e
+			return
+		}
+		perms = append(perms, string(pb))
+	}
+	if v, e := r.ReadI64(); e != nil {
+		err = e
+		return
+	} else {
+		exp = v
+	}
+	if sb, e := r.Read(32); e != nil {
+		err = e
+		return
+	} else {
+		copy(sig[:], sb)
+	}
+	return
+}
+
+// ========== Users Management payloads ==========
+
+// UserItem 精简版用户对象（避免泄漏密码哈希）
+type UserItem struct {
+	ID           uint64
+	Username     string
+	DisplayName  string
+	Disabled     bool
+	CreatedAtSec int64
+	UpdatedAtSec int64
+}
+
+// EncodeUserListResp {request_id:u64, count:u32, items:[UserItem]}
+func EncodeUserListResp(requestID uint64, items []UserItem) []byte {
+	w := NewWriter(128 + len(items)*64)
+	w.WriteU64(requestID)
+	w.WriteU32(uint32(len(items)))
+	for _, u := range items {
+		w.WriteU64(u.ID)
+		ub := []byte(u.Username)
+		w.WriteLen16(len(ub))
+		w.WriteBytes(ub)
+		db := []byte(u.DisplayName)
+		w.WriteLen16(len(db))
+		w.WriteBytes(db)
+		if u.Disabled {
+			w.WriteBytes([]byte{1})
+		} else {
+			w.WriteBytes([]byte{0})
+		}
+		w.WriteI64(u.CreatedAtSec)
+		w.WriteI64(u.UpdatedAtSec)
+	}
+	return w.Bytes()
+}
+
+// DecodeUserListResp -> (request_id, items)
+func DecodeUserListResp(b []byte) (requestID uint64, items []UserItem, err error) {
+	r := NewReader(b)
+	if v, e := r.ReadU64(); e != nil {
+		return 0, nil, e
+	} else {
+		requestID = v
+	}
+	n32, e := r.ReadU32()
+	if e != nil {
+		return 0, nil, e
+	}
+	n := int(n32)
+	items = make([]UserItem, 0, n)
+	for i := 0; i < n; i++ {
+		var it UserItem
+		if v, e := r.ReadU64(); e != nil {
+			return 0, nil, e
+		} else {
+			it.ID = v
+		}
+		ln, e := r.ReadLen16()
+		if e != nil {
+			return 0, nil, e
+		}
+		ub, e := r.Read(ln)
+		if e != nil {
+			return 0, nil, e
+		}
+		it.Username = string(ub)
+		ln, e = r.ReadLen16()
+		if e != nil {
+			return 0, nil, e
+		}
+		db, e := r.Read(ln)
+		if e != nil {
+			return 0, nil, e
+		}
+		it.DisplayName = string(db)
+		if bb, e := r.Read(1); e != nil {
+			return 0, nil, e
+		} else {
+			it.Disabled = bb[0] != 0
+		}
+		if v, e := r.ReadI64(); e != nil {
+			return 0, nil, e
+		} else {
+			it.CreatedAtSec = v
+		}
+		if v, e := r.ReadI64(); e != nil {
+			return 0, nil, e
+		} else {
+			it.UpdatedAtSec = v
+		}
+		items = append(items, it)
+	}
+	return
+}
+
+// EncodeUserCreateReq {user_key:str, username:str, display_name:str, password:str}
+func EncodeUserCreateReq(userKey, username, displayName, password string) []byte {
+	w := NewWriter(128)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	un := []byte(username)
+	w.WriteLen16(len(un))
+	w.WriteBytes(un)
+	dn := []byte(displayName)
+	w.WriteLen16(len(dn))
+	w.WriteBytes(dn)
+	pw := []byte(password)
+	w.WriteLen16(len(pw))
+	w.WriteBytes(pw)
+	return w.Bytes()
+}
+
+func DecodeUserCreateReq(b []byte) (userKey, username, displayName, password string, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		return "", "", "", "", e
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", "", e
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", "", "", "", e
+	}
+	un, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", "", e
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", "", "", "", e
+	}
+	dn, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", "", e
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", "", "", "", e
+	}
+	pw, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", "", e
+	}
+	return string(uk), string(un), string(dn), string(pw), nil
+}
+
+// EncodeUserCreateResp {request_id:u64, id:u64}
+func EncodeUserCreateResp(requestID, id uint64) []byte {
+	w := NewWriter(32)
+	w.WriteU64(requestID)
+	w.WriteU64(id)
+	return w.Bytes()
+}
+
+func DecodeUserCreateResp(b []byte) (requestID, id uint64, err error) {
+	r := NewReader(b)
+	if v, e := r.ReadU64(); e != nil {
+		return 0, 0, e
+	} else {
+		requestID = v
+	}
+	if v, e := r.ReadU64(); e != nil {
+		return 0, 0, e
+	} else {
+		id = v
+	}
+	return
+}
+
+// EncodeUserUpdateReq {user_key:str, id:u64, bitmap: display_name(bit0), password(bit1), disabled(bit2); fields}
+func EncodeUserUpdateReq(userKey string, id uint64, displayName *string, password *string, disabled *bool) []byte {
+	w := NewWriter(128)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	w.WriteU64(id)
+	var bm uint8
+	if displayName != nil {
+		bm |= 1 << 0
+	}
+	if password != nil {
+		bm |= 1 << 1
+	}
+	if disabled != nil {
+		bm |= 1 << 2
+	}
+	w.WriteBytes([]byte{bm})
+	if displayName != nil {
+		b := []byte(*displayName)
+		w.WriteLen16(len(b))
+		w.WriteBytes(b)
+	}
+	if password != nil {
+		b := []byte(*password)
+		w.WriteLen16(len(b))
+		w.WriteBytes(b)
+	}
+	if disabled != nil {
+		if *disabled {
+			w.WriteBytes([]byte{1})
+		} else {
+			w.WriteBytes([]byte{0})
+		}
+	}
+	return w.Bytes()
+}
+
+func DecodeUserUpdateReq(b []byte) (userKey string, id uint64, displayName *string, password *string, disabled *bool, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		err = e
+		return
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		err = e
+		return
+	}
+	userKey = string(uk)
+	if v, e := r.ReadU64(); e != nil {
+		err = e
+		return
+	} else {
+		id = v
+	}
+	bb, e := r.Read(1)
+	if e != nil {
+		err = e
+		return
+	}
+	bm := bb[0]
+	if bm&(1<<0) != 0 {
+		ln, e = r.ReadLen16()
+		if e != nil {
+			err = e
+			return
+		}
+		b, e := r.Read(ln)
+		if e != nil {
+			err = e
+			return
+		}
+		s := string(b)
+		displayName = &s
+	}
+	if bm&(1<<1) != 0 {
+		ln, e = r.ReadLen16()
+		if e != nil {
+			err = e
+			return
+		}
+		b, e := r.Read(ln)
+		if e != nil {
+			err = e
+			return
+		}
+		s := string(b)
+		password = &s
+	}
+	if bm&(1<<2) != 0 {
+		b, e := r.Read(1)
+		if e != nil {
+			err = e
+			return
+		}
+		d := b[0] != 0
+		disabled = &d
+	}
+	return
+}
+
+// EncodeUserDeleteReq {user_key:str, id:u64}
+func EncodeUserDeleteReq(userKey string, id uint64) []byte {
+	w := NewWriter(64)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	w.WriteU64(id)
+	return w.Bytes()
+}
+
+func DecodeUserDeleteReq(b []byte) (userKey string, id uint64, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		return "", 0, e
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		return "", 0, e
+	}
+	if v, e := r.ReadU64(); e != nil {
+		return "", 0, e
+	} else {
+		return string(uk), v, nil
+	}
+}
+
+// PermissionItem 权限节点条目
+type PermissionItem struct{ Node string }
+
+// EncodeUserPermListResp {request_id:u64, count:u32, items:[len16+utf8]}
+func EncodeUserPermListResp(requestID uint64, items []PermissionItem) []byte {
+	w := NewWriter(64 + len(items)*16)
+	w.WriteU64(requestID)
+	w.WriteU32(uint32(len(items)))
+	for _, it := range items {
+		b := []byte(it.Node)
+		w.WriteLen16(len(b))
+		w.WriteBytes(b)
+	}
+	return w.Bytes()
+}
+
+func DecodeUserPermListResp(b []byte) (requestID uint64, items []PermissionItem, err error) {
+	r := NewReader(b)
+	if v, e := r.ReadU64(); e != nil {
+		return 0, nil, e
+	} else {
+		requestID = v
+	}
+	n32, e := r.ReadU32()
+	if e != nil {
+		return 0, nil, e
+	}
+	n := int(n32)
+	items = make([]PermissionItem, 0, n)
+	for i := 0; i < n; i++ {
+		ln, e := r.ReadLen16()
+		if e != nil {
+			return 0, nil, e
+		}
+		b, e := r.Read(ln)
+		if e != nil {
+			return 0, nil, e
+		}
+		items = append(items, PermissionItem{Node: string(b)})
+	}
+	return
+}
+
+// EncodeUserPermListReq {user_key:str, user_id:u64}
+func EncodeUserPermListReq(userKey string, userID uint64) []byte {
+	w := NewWriter(64)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	w.WriteU64(userID)
+	return w.Bytes()
+}
+
+func DecodeUserPermListReq(b []byte) (userKey string, userID uint64, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		return "", 0, e
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		return "", 0, e
+	}
+	if v, e := r.ReadU64(); e != nil {
+		return "", 0, e
+	} else {
+		return string(uk), v, nil
+	}
+}
+
+// EncodeUserPermAddReq {user_key:str, user_id:u64, node:str}
+func EncodeUserPermAddReq(userKey string, userID uint64, node string) []byte {
+	w := NewWriter(96)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	w.WriteU64(userID)
+	nb := []byte(node)
+	w.WriteLen16(len(nb))
+	w.WriteBytes(nb)
+	return w.Bytes()
+}
+
+func DecodeUserPermAddReq(b []byte) (userKey string, userID uint64, node string, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		return "", 0, "", e
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		return "", 0, "", e
+	}
+	if v, e := r.ReadU64(); e != nil {
+		return "", 0, "", e
+	} else {
+		userID = v
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", 0, "", e
+	}
+	nb, e := r.Read(ln)
+	if e != nil {
+		return "", 0, "", e
+	}
+	return string(uk), userID, string(nb), nil
+}
+
+// EncodeUserPermRemoveReq 同 Add，仅语义不同
+func EncodeUserPermRemoveReq(userKey string, userID uint64, node string) []byte {
+	return EncodeUserPermAddReq(userKey, userID, node)
+}
+func DecodeUserPermRemoveReq(b []byte) (string, uint64, string, error) {
+	return DecodeUserPermAddReq(b)
+}
+
+// EncodeUserSelfUpdateReq {user_key:str, display_name:str}
+func EncodeUserSelfUpdateReq(userKey string, displayName string) []byte {
+	w := NewWriter(96)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	dn := []byte(displayName)
+	w.WriteLen16(len(dn))
+	w.WriteBytes(dn)
+	return w.Bytes()
+}
+
+func DecodeUserSelfUpdateReq(b []byte) (userKey string, displayName string, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		return "", "", e
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		return "", "", e
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", "", e
+	}
+	dn, e := r.Read(ln)
+	if e != nil {
+		return "", "", e
+	}
+	return string(uk), string(dn), nil
+}
+
+// EncodeUserSelfPasswordReq {user_key:str, old_password:str, new_password:str}
+func EncodeUserSelfPasswordReq(userKey, oldPassword, newPassword string) []byte {
+	w := NewWriter(128)
+	uk := []byte(userKey)
+	w.WriteLen16(len(uk))
+	w.WriteBytes(uk)
+	op := []byte(oldPassword)
+	w.WriteLen16(len(op))
+	w.WriteBytes(op)
+	np := []byte(newPassword)
+	w.WriteLen16(len(np))
+	w.WriteBytes(np)
+	return w.Bytes()
+}
+
+func DecodeUserSelfPasswordReq(b []byte) (userKey, oldPassword, newPassword string, err error) {
+	r := NewReader(b)
+	ln, e := r.ReadLen16()
+	if e != nil {
+		return "", "", "", e
+	}
+	uk, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", e
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", "", "", e
+	}
+	op, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", e
+	}
+	ln, e = r.ReadLen16()
+	if e != nil {
+		return "", "", "", e
+	}
+	np, e := r.Read(ln)
+	if e != nil {
+		return "", "", "", e
+	}
+	return string(uk), string(op), string(np), nil
 }
 
 // ========== User/Auth ==========
