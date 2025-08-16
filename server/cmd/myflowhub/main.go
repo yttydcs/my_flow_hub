@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"myflowhub/pkg/config"
 	"myflowhub/pkg/database"
+	"myflowhub/server/internal/binroutes"
 	"myflowhub/server/internal/controller"
 	"myflowhub/server/internal/hub"
 	"myflowhub/server/internal/repository"
@@ -92,45 +93,16 @@ func main() {
 	// 注入系统日志服务到 hub（用于连接/断开等事件记录）
 	server.Syslog = systemLogService
 
-	// 注册路由
-	server.RegisterRoute("query_nodes", deviceController.HandleQueryNodes)
-	server.RegisterRoute("create_device", deviceController.HandleCreateDevice)
-	server.RegisterRoute("update_device", deviceController.HandleUpdateDevice)
-	server.RegisterRoute("delete_device", deviceController.HandleDeleteDevice)
-	server.RegisterRoute("query_variables", variableController.HandleQueryVariables)
-	server.RegisterRoute("vars_query", variableController.HandleVarsQuery)
-	server.RegisterRoute("var_update", variableController.HandleVarUpdate)
-	server.RegisterRoute("var_delete", variableController.HandleVarDelete)
-	// 用户管理（仅管理员）
-	server.RegisterRoute("user_list", userController.HandleUserList)
-	server.RegisterRoute("user_create", userController.HandleUserCreate)
-	server.RegisterRoute("user_update", userController.HandleUserUpdate)
-	server.RegisterRoute("user_delete", userController.HandleUserDelete)
-	// 用户权限管理（仅管理员）
-	server.RegisterRoute("user_perm_list", userController.HandleUserPermList)
-	server.RegisterRoute("user_perm_add", userController.HandleUserPermAdd)
-	server.RegisterRoute("user_perm_remove", userController.HandleUserPermRemove)
-	// 普通用户自助：个人资料与修改密码
-	server.RegisterRoute("user_self_update", userController.HandleUserSelfUpdate)
-	server.RegisterRoute("user_self_password", userController.HandleUserSelfPassword)
-	// 密钥管理（按用户权限范围）
-	server.RegisterRoute("key_list", keyController.HandleKeyList)
-	server.RegisterRoute("key_create", keyController.HandleKeyCreate)
-	server.RegisterRoute("key_update", keyController.HandleKeyUpdate)
-	server.RegisterRoute("key_delete", keyController.HandleKeyDelete)
-	// 密钥创建辅助：可见设备列表
-	server.RegisterRoute("key_devices", keyController.HandleKeyDevices)
-	// 系统日志查询（需 log.read/admin）
-	server.RegisterRoute("systemlog_list", systemLogController.HandleSystemLogList)
-
 	// 启动前：按策略初始化默认管理员
 	seedDefaultAdmin(userService, permRepo)
-	server.RegisterRoute("auth_request", authController.HandleAuthRequest)
-	server.RegisterRoute("manager_auth", authController.HandleManagerAuthRequest)
-	server.RegisterRoute("register_request", authController.HandleRegisterRequest)
-	server.RegisterRoute("user_login", authController.HandleUserLogin)
-	server.RegisterRoute("user_me", authController.HandleUserMe)
-	server.RegisterRoute("user_logout", authController.HandleUserLogout)
+
+	// 使用拆分后的路由注册
+	binroutes.RegisterAuthRoutes(server, authService, deviceService, userRepo, keyService, permRepo)
+	binroutes.RegisterSystemLogRoutes(server, keyService, authzService, systemLogService)
+	binroutes.RegisterDeviceRoutes(server, deviceService, permService, authzService)
+	binroutes.RegisterVariableRoutes(server, variableService, deviceService, permService, authzService)
+	binroutes.RegisterKeyRoutes(server, keyService, permService)
+	binroutes.RegisterKeyDevicesRoute(server, keyService)
 
 	server.Start() // 阻塞式启动
 }

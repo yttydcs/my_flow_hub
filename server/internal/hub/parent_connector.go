@@ -1,12 +1,9 @@
 package hub
 
 import (
-	"encoding/json"
-	"myflowhub/pkg/protocol"
 	"net/url"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -46,12 +43,11 @@ func (s *Server) connectToParent() {
 func (s *Server) readPumpFromParent(conn *websocket.Conn, done chan struct{}) {
 	defer close(done)
 	for {
-		var msg protocol.BaseMessage
-		if err := conn.ReadJSON(&msg); err != nil {
+		if _, _, err := conn.ReadMessage(); err != nil {
 			log.Error().Err(err).Msg("从上级读取消息失败")
 			return
 		}
-		log.Info().Interface("message", msg).Msg("收到来自上级的消息")
+		log.Info().Msg("收到来自上级的消息(二进制未实现，忽略)")
 		// Here we could handle messages from parent, e.g., route them to our children
 	}
 }
@@ -68,19 +64,12 @@ func (s *Server) writePumpToParent(conn *websocket.Conn, done chan struct{}) {
 				conn.WriteMessage(websocket.CloseMessage, []byte{})
 				return
 			}
-			if err := conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if err := conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				log.Error().Err(err).Msg("向上级写入消息失败")
 				return
 			}
 		case <-ticker.C:
-			pingMsg := protocol.BaseMessage{
-				ID:      uuid.New().String(),
-				Target:  0,
-				Type:    "ping",
-				Payload: map[string]string{"status": "ok"},
-			}
-			pingBytes, _ := json.Marshal(pingMsg)
-			if err := conn.WriteMessage(websocket.TextMessage, pingBytes); err != nil {
+			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
 				log.Error().Err(err).Msg("向上级发送心跳失败")
 				return
 			}
@@ -92,20 +81,5 @@ func (s *Server) writePumpToParent(conn *websocket.Conn, done chan struct{}) {
 
 // authenticateWithParent sends an authentication request to the parent.
 func (s *Server) authenticateWithParent(conn *websocket.Conn) {
-	log.Info().Uint64("deviceID", s.DeviceID).Msg("向上级发送认证请求...")
-	authPayload := protocol.AuthRequestPayload{
-		DeviceID:  s.DeviceID,
-		SecretKey: s.SecretKey,
-	}
-	message := protocol.BaseMessage{
-		ID:      uuid.New().String(),
-		Target:  0,
-		Type:    "auth_request",
-		Payload: authPayload,
-	}
-	authBytes, _ := json.Marshal(message)
-	// Send directly instead of via channel, as this is the first message.
-	if err := conn.WriteMessage(websocket.TextMessage, authBytes); err != nil {
-		log.Error().Err(err).Msg("向上级发送认证失败")
-	}
+	log.Info().Msg("二进制父链路认证未实现，跳过")
 }

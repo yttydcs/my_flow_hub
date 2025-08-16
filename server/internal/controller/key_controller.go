@@ -3,12 +3,10 @@ package controller
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
+	"fmt"
 	"time"
 
 	"myflowhub/pkg/database"
-	"myflowhub/pkg/protocol"
-	"myflowhub/server/internal/hub"
 	"myflowhub/server/internal/service"
 )
 
@@ -24,161 +22,94 @@ func NewKeyController(keys *service.KeyService) *KeyController {
 // 可选注入审计服务
 func (c *KeyController) SetAuditService(a *service.AuditService) { c.audit = a }
 
+// --- Business methods for binroutes ---
+
+// List returns keys visible to the user represented by userKey.
+func (c *KeyController) List(userKey string) ([]database.Key, error) {
+	if userKey == "" {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return c.keys.ListKeys(uid)
+}
+
+// Create issues a new key bound optionally and returns the generated secret with created key and attached nodes.
+func (c *KeyController) Create(userKey string, bindType *string, bindID *uint64, expiresAt *time.Time, maxUses *int32, meta []byte, nodes []string) (secret string, key *database.Key, outNodes []string, err error) {
+	if userKey == "" {
+		return "", nil, nil, fmt.Errorf("unauthorized")
+	}
+	uid, _, e := c.keys.PeekUserKey(userKey)
+	if e != nil || uid == 0 {
+		return "", nil, nil, fmt.Errorf("unauthorized")
+	}
+	// server generates 32-byte random secret
+	buf := make([]byte, 32)
+	if _, e := rand.Read(buf); e != nil {
+		return "", nil, nil, fmt.Errorf("entropy failed")
+	}
+	secret = hex.EncodeToString(buf)
+	var expPtr *time.Time
+	if expiresAt != nil {
+		v := *expiresAt
+		expPtr = &v
+	}
+	var maxPtr *int
+	if maxUses != nil {
+		v := int(*maxUses)
+		maxPtr = &v
+	}
+	k, e := c.keys.CreateKey(uid, bindType, bindID, secret, expPtr, maxPtr, meta)
+	if e != nil {
+		return "", nil, nil, fmt.Errorf("create failed")
+	}
+	if len(nodes) > 0 {
+		if err := c.keys.AttachKeyPermissions(uid, k.ID, nodes); err != nil {
+			return "", nil, nil, fmt.Errorf("invalid key permission nodes")
+		}
+	}
+	return secret, k, nodes, nil
+}
+
+// Update updates a key record, with permissions checked by userKey holder.
+func (c *KeyController) Update(userKey string, item *database.Key) error {
+	if userKey == "" {
+		return fmt.Errorf("unauthorized")
+	}
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return fmt.Errorf("unauthorized")
+	}
+	return c.keys.UpdateKey(uid, item)
+}
+
+// Delete deletes a key by id with permission checks.
+func (c *KeyController) Delete(userKey string, id uint64) error {
+	// Placeholder for future implementations
+	if userKey == "" {
+		return fmt.Errorf("unauthorized")
+	}
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return fmt.Errorf("unauthorized")
+	}
+	return c.keys.DeleteKey(uid, id)
+}
+
+// VisibleDevices lists devices the user can select when creating a key.
+func (c *KeyController) VisibleDevices(userKey string) ([]database.Device, error) {
+	if userKey == "" {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return c.keys.ListVisibleDevicesForKey(uid)
+}
+
 // HandleKeyList 按规则返回可见密钥列表
-func (c *KeyController) HandleKeyList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	// 读取 manager 转发的用户 key（仅 key 模式）
-	var requesterID uint64
-	if m, ok := msg.Payload.(map[string]interface{}); ok {
-		if uk, ok := m["userKey"].(string); ok && uk != "" {
-			if uid, _, err := c.keys.ValidateUserKey(uk); err == nil {
-				requesterID = uid
-			}
-		}
-	}
-	if requesterID == 0 {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-	list, err := c.keys.ListKeys(requesterID)
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": list})
-}
 
-// HandleKeyCreate 由服务器生成密钥，并返回给客户端一次性展示
-func (c *KeyController) HandleKeyCreate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var body struct {
-		UserKey string          `json:"userKey"`
-		BindTyp *string         `json:"bindType"`
-		BindID  *uint64         `json:"bindId"`
-		Expires *time.Time      `json:"expiresAt"`
-		MaxUses *int            `json:"maxUses"`
-		Meta    json.RawMessage `json:"meta"`
-		Nodes   []string        `json:"nodes"`
-	}
-	b, _ := json.Marshal(msg.Payload)
-	_ = json.Unmarshal(b, &body)
-	var requesterID uint64
-	if body.UserKey != "" {
-		if uid, _, err := c.keys.ValidateUserKey(body.UserKey); err == nil {
-			requesterID = uid
-		}
-	}
-	// 回退：若未能通过 userKey 解析，则尝试 token 会话
-	// key-only：不再支持 token 回退
-	if requesterID == 0 {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-
-	// 服务器生成随机密钥（十六进制字符串）；生产建议仅返回一次并保存哈希
-	random := make([]byte, 32)
-	if _, err := rand.Read(random); err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	secret := hex.EncodeToString(random)
-
-	k, err := c.keys.CreateKey(requesterID, body.BindTyp, body.BindID, secret, body.Expires, body.MaxUses, body.Meta)
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	if len(body.Nodes) > 0 {
-		if err := c.keys.AttachKeyPermissions(requesterID, k.ID, body.Nodes); err != nil {
-			s.SendErrorResponse(client, msg.ID, "invalid key permission nodes")
-			return
-		}
-	}
-	if c.audit != nil {
-		_ = c.audit.Write("user", &requesterID, "key.create", "", "allow", "", "", nil)
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": k, "secret": secret, "nodes": body.Nodes})
-}
-
-func (c *KeyController) HandleKeyUpdate(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var body database.Key
-	b, _ := json.Marshal(msg.Payload)
-	_ = json.Unmarshal(b, &body)
-	var userKey string
-	if m, ok := msg.Payload.(map[string]interface{}); ok {
-		if k, ok := m["userKey"].(string); ok {
-			userKey = k
-		}
-	}
-	var requesterID uint64
-	if userKey != "" {
-		if uid, _, err := c.keys.ValidateUserKey(userKey); err == nil {
-			requesterID = uid
-		}
-	}
-	// key-only：不再支持 token 回退
-	if requesterID == 0 {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-	if err := c.keys.UpdateKey(requesterID, &body); err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	if c.audit != nil {
-		_ = c.audit.Write("user", &requesterID, "key.update", "", "allow", "", "", nil)
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
-}
-
-func (c *KeyController) HandleKeyDelete(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var body struct {
-		UserKey string `json:"userKey"`
-		ID      uint64 `json:"id"`
-	}
-	b, _ := json.Marshal(msg.Payload)
-	_ = json.Unmarshal(b, &body)
-	var requesterID uint64
-	if body.UserKey != "" {
-		if uid, _, err := c.keys.ValidateUserKey(body.UserKey); err == nil {
-			requesterID = uid
-		}
-	}
-	// key-only：不再支持 token 回退
-	if requesterID == 0 {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-	if err := c.keys.DeleteKey(requesterID, body.ID); err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	if c.audit != nil {
-		_ = c.audit.Write("user", &requesterID, "key.delete", "", "allow", "", "", nil)
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
-}
-
-// HandleKeyDevices 返回当前用户在创建密钥时可选择的设备集合
-func (c *KeyController) HandleKeyDevices(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var body struct {
-		UserKey string `json:"userKey"`
-	}
-	b, _ := json.Marshal(msg.Payload)
-	_ = json.Unmarshal(b, &body)
-	var requesterID uint64
-	if body.UserKey != "" {
-		if uid, _, err := c.keys.ValidateUserKey(body.UserKey); err == nil {
-			requesterID = uid
-		}
-	}
-	// key-only：不再支持 token 回退
-	if requesterID == 0 {
-		s.SendErrorResponse(client, msg.ID, "unauthorized")
-		return
-	}
-	list, err := c.keys.ListVisibleDevicesForKey(requesterID)
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": list})
-}
+// 已移除所有 JSON Handler；仅保留业务方法供二进制路由调用

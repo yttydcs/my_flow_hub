@@ -41,7 +41,7 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | **其他** | | |
 | 外部化配置 | ✅ 已实现 | 所有关键配置均在 `config.json` 中。 |
 | 权限管理 | ✅ 已实现 | 基于权限节点与通配符，管理员需 admin.manage；支持用户权限编辑与快照下发。 |
-| 二进制协议支持 | ❌ 未实现 | 当前使用JSON，未来可优化。 |
+| 二进制协议支持 | ✅ 已实现 | 仅二进制：WebSocket 子协议 myflowhub.bin.v1；JSON 已移除。 |
 
 ## 项目结构
 
@@ -52,10 +52,11 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 -   **`server/`**: Go 核心消息服务端。
     -   `cmd/myflowhub/main.go`: `main` 包，程序入口。
     -   `internal/`: 采用`controller-service-repository`分层架构。
-        - `hub/`: WebSocket 连接管理和核心消息循环。
-        - `controller/`: 处理WebSocket消息，调用服务。
+        - `hub/`: WebSocket 连接管理和核心消息循环（仅二进制）。
+        - `controller/`: 处理二进制消息（通过适配器），调用服务。
         - `service/`: 封装核心业务逻辑。
         - `repository/`: 数据持久化操作。
+    - 二进制路由注册入口：`server/internal/binroutes/register.go`（集中将 TypeID 绑定到 controller 适配器）。
 -   **`manager/`**: Go 后台管理服务 (BFF)。
     -   `cmd/manager/main.go`: `main` 包，程序入口。
     -   `internal/`:

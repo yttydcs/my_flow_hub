@@ -7,9 +7,8 @@ import (
 
 	"myflowhub/manager/internal/api/handlers"
 	"myflowhub/manager/internal/client"
-	"myflowhub/pkg/protocol"
+	binproto "myflowhub/pkg/protocol/binproto"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -159,34 +158,15 @@ func (api *ManagerAPI) handleSendMessage(w http.ResponseWriter, r *http.Request)
 		api.writeError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
-
-	// 发送管理指令
-	msg := protocol.BaseMessage{
-		ID:        uuid.New().String(),
-		Type:      req.Type,
-		Target:    req.Target,
-		Timestamp: time.Now(),
-		Payload:   req.Payload,
-	}
-
-	if err := api.hubClient.SendMessage(msg); err != nil {
-		api.writeError(w, http.StatusInternalServerError, "Failed to send message")
+	// 当前仅支持二进制协议；透传 MSG_SEND 到目标或广播。
+	payloadBytes, _ := json.Marshal(req.Payload)
+	h := binproto.HeaderV1{TypeID: binproto.TypeMsgSend, MsgID: api.hubClient.NextMsgID(), Source: api.hubClient.GetDeviceID(), Target: req.Target, Timestamp: time.Now().UnixMilli()}
+	frame, _ := binproto.EncodeFrame(h, payloadBytes)
+	if err := api.hubClient.ConnWriteBinary(frame); err != nil {
+		api.writeError(w, http.StatusBadGateway, "Failed to send to hub: "+err.Error())
 		return
 	}
-
-	// 等待响应（可选）
-	if response, err := api.hubClient.GetResponse(5 * time.Second); err == nil {
-		api.writeJSON(w, map[string]interface{}{
-			"success":  true,
-			"message":  "Message sent successfully",
-			"response": response,
-		})
-	} else {
-		api.writeJSON(w, map[string]interface{}{
-			"success": true,
-			"message": "Message sent, no response received",
-		})
-	}
+	api.writeJSON(w, map[string]any{"success": true})
 }
 
 // handleLogin 将登录请求转发为 hub 的 user_login 消息
@@ -205,13 +185,25 @@ func (api *ManagerAPI) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_login", Payload: creds, Timestamp: time.Now()}
-	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
-	if err != nil {
-		api.writeError(w, http.StatusUnauthorized, "login failed")
-		return
+	if api.hubClient.IsConnected() {
+		// Prefer binary
+		if payload, err := api.hubClient.SendBinaryRequest(binproto.TypeUserLoginReq, binproto.TypeUserLoginResp, binproto.EncodeUserLoginReq(creds.Username, creds.Password), 5*time.Second); err == nil {
+			// Decode to JSON-like struct
+			reqID, keyID, userID, token, username, displayName, perms, derr := binproto.DecodeUserLoginResp(payload)
+			if derr == nil {
+				api.writeJSON(w, map[string]any{
+					"success":     true,
+					"original_id": reqID,
+					"token":       token,
+					"keyId":       keyID,
+					"user":        map[string]any{"id": userID, "username": username, "displayName": displayName},
+					"permissions": perms,
+				})
+				return
+			}
+		}
 	}
-	api.writeJSON(w, resp.Payload)
+	api.writeError(w, http.StatusBadGateway, "binary login failed")
 }
 
 // handleMe 根据 Authorization 的 userKey 返回用户与权限
@@ -226,13 +218,18 @@ func (api *ManagerAPI) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := authz[7:]
-	msg := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_me", Payload: map[string]interface{}{"userKey": token}, Timestamp: time.Now()}
-	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
-	if err != nil {
-		api.writeError(w, http.StatusUnauthorized, "invalid")
-		return
+	if payload, err := api.hubClient.SendBinaryRequest(binproto.TypeUserMeReq, binproto.TypeUserMeResp, binproto.EncodeUserMeReq(token), 5*time.Second); err == nil {
+		if reqID, userID, username, displayName, perms, derr := binproto.DecodeUserMeResp(payload); derr == nil {
+			api.writeJSON(w, map[string]any{
+				"success":     true,
+				"original_id": reqID,
+				"user":        map[string]any{"id": userID, "username": username, "displayName": displayName},
+				"permissions": perms,
+			})
+			return
+		}
 	}
-	api.writeJSON(w, resp.Payload)
+	api.writeError(w, http.StatusBadGateway, "binary me failed")
 }
 
 // handleLogout 撤销当前 userKey
@@ -247,13 +244,13 @@ func (api *ManagerAPI) handleLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := authz[7:]
-	msg := protocol.BaseMessage{ID: uuid.New().String(), Type: "user_logout", Payload: map[string]interface{}{"userKey": token}, Timestamp: time.Now()}
-	resp, err := api.hubClient.SendRequest(msg, 5*time.Second)
-	if err != nil {
-		api.writeError(w, http.StatusInternalServerError, "failed")
-		return
+	if payload, err := api.hubClient.SendBinaryRequest(binproto.TypeUserLogoutReq, binproto.TypeOKResp, binproto.EncodeUserLogoutReq(token), 5*time.Second); err == nil {
+		if _, code, msgb, derr := binproto.DecodeOKResp(payload); derr == nil {
+			api.writeJSON(w, map[string]any{"success": code == 0, "message": string(msgb)})
+			return
+		}
 	}
-	api.writeJSON(w, resp.Payload)
+	api.writeError(w, http.StatusBadGateway, "binary logout failed")
 }
 
 // handleDebugDB 调试数据库连接和表结构

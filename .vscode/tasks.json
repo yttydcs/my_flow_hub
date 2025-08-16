@@ -13,6 +13,26 @@
 				"$go"
 			],
 			"group": "build"
+		},
+		{
+			"label": "go-build-server",
+			"type": "shell",
+			"command": "go",
+			"args": [
+				"build",
+				"./..."
+			],
+			"group": "build"
+		},
+		{
+			"label": "go-build-server",
+			"type": "shell",
+			"command": "go",
+			"args": [
+				"build",
+				"./..."
+			],
+			"group": "build"
 		}
 	]
 }

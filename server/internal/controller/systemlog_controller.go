@@ -1,9 +1,7 @@
 package controller
 
 import (
-	"encoding/json"
-	"myflowhub/pkg/protocol"
-	"myflowhub/server/internal/hub"
+	"fmt"
 	"myflowhub/server/internal/service"
 )
 
@@ -28,26 +26,16 @@ type SystemLogListRequest struct {
 }
 
 // HandleSystemLogList 通过 hub 路由处理系统日志列表查询（需要 log.read 或 admin.manage）
-func (c *SystemLogController) HandleSystemLogList(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var userKey string
-	var req SystemLogListRequest
-	if m, ok := msg.Payload.(map[string]interface{}); ok {
-		if uk, ok2 := m["userKey"].(string); ok2 {
-			userKey = uk
-		}
-		b, _ := json.Marshal(m)
-		_ = json.Unmarshal(b, &req)
-	}
+// List is transport-agnostic method to list system logs with userKey authorization.
+func (c *SystemLogController) List(userKey string, req SystemLogListRequest) (*service.SystemLogListOutput, error) {
 	if c.authz == nil {
-		s.SendErrorResponse(client, msg.ID, "not configured")
-		return
+		return nil, fmt.Errorf("not configured")
 	}
 	uid, ok := c.authz.ResolveUserIDFromKey(userKey)
 	if !ok || !(c.authz.HasUserPermission(uid, "log.read") || c.authz.HasUserPermission(uid, "admin.manage")) {
-		s.SendErrorResponse(client, msg.ID, "permission denied")
-		return
+		return nil, fmt.Errorf("permission denied")
 	}
-	out, err := c.svc.List(service.SystemLogListInput{
+	return c.svc.List(service.SystemLogListInput{
 		Level:    req.Level,
 		Source:   req.Source,
 		Keyword:  req.Keyword,
@@ -56,9 +44,4 @@ func (c *SystemLogController) HandleSystemLogList(s *hub.Server, client *hub.Cli
 		Page:     req.Page,
 		PageSize: req.PageSize,
 	})
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": out})
 }

@@ -3,11 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"myflowhub/manager/internal/client"
-	"myflowhub/pkg/protocol"
+	binproto "myflowhub/pkg/protocol/binproto"
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,19 +28,23 @@ func (h *DeviceHandler) HandleGetDevices(w http.ResponseWriter, r *http.Request)
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	req := protocol.BaseMessage{
-		ID:      uuid.New().String(),
-		Type:    "query_nodes",
-		Payload: map[string]interface{}{"userKey": token},
+	// 优先二进制
+	if h.hubClient != nil && h.hubClient.IsConnected() {
+		payload := binproto.EncodeQueryNodesReq(token)
+		if resp, err := h.hubClient.SendBinaryRequest(binproto.TypeQueryNodesReq, binproto.TypeQueryNodesResp, payload, 5*time.Second); err == nil {
+			if _, items, err2 := binproto.DecodeQueryNodesResp(resp); err2 == nil {
+				// 直接返回为向后兼容的 JSON 结构：{ success:true, data:[devices] }
+				h.writeJSON(w, map[string]any{"success": true, "data": items})
+				return
+			}
+		} else if err != client.ErrTimeout {
+			// 非超时：直接报网关错误，避免落入 JSON 回退触发匿名警告
+			h.writeError(w, http.StatusBadGateway, "hub error: "+err.Error())
+			return
+		}
 	}
-
-	response, err := h.hubClient.SendRequest(req, 5*time.Second)
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "Failed to get devices from hub: "+err.Error())
-		return
-	}
-
-	h.writeJSON(w, response.Payload)
+	// 二进制失败即返回
+	h.writeError(w, http.StatusBadGateway, "hub error or timeout")
 }
 
 // HandleCreateDevice 处理创建设备
@@ -55,22 +58,55 @@ func (h *DeviceHandler) HandleCreateDevice(w http.ResponseWriter, r *http.Reques
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	if reqBody == nil {
-		reqBody = map[string]interface{}{}
+	// 优先二进制
+	if h.hubClient != nil && h.hubClient.IsConnected() {
+		// 构建 DeviceItem
+		item := binproto.DeviceItem{}
+		if v, ok := reqBody["ID"].(float64); ok {
+			item.ID = uint64(v)
+		}
+		if v, ok := reqBody["DeviceUID"].(float64); ok {
+			item.DeviceUID = uint64(v)
+		}
+		if v, ok := reqBody["HardwareID"].(string); ok {
+			item.HardwareID = v
+		}
+		if v, ok := reqBody["Role"].(string); ok {
+			item.Role = v
+		}
+		if v, ok := reqBody["Name"].(string); ok {
+			item.Name = v
+		}
+		if v, ok := reqBody["ParentID"].(float64); ok {
+			vv := uint64(v)
+			item.ParentID = &vv
+		} else if v, ok := reqBody["parentId"].(float64); ok {
+			vv := uint64(v)
+			item.ParentID = &vv
+		}
+		if v, ok := reqBody["OwnerUserID"].(float64); ok {
+			vv := uint64(v)
+			item.OwnerUserID = &vv
+		}
+		payload := binproto.EncodeCreateDeviceReq(token, item)
+		// 期待 OK；若收到 ERR 或解码异常，直接向前端报错，避免回退 JSON 触发匿名警告
+		if resp, err := h.hubClient.SendBinaryRequest(binproto.TypeCreateDeviceReq, binproto.TypeOKResp, payload, 5*time.Second); err == nil {
+			if _, code, msg, e2 := binproto.DecodeOKResp(resp); e2 == nil {
+				if code == 0 {
+					h.writeJSON(w, map[string]any{"success": true})
+					return
+				}
+				h.writeError(w, http.StatusForbidden, string(msg))
+				return
+			}
+		} else if err == client.ErrTimeout {
+			// 仅超时回退
+		} else {
+			h.writeError(w, http.StatusBadGateway, "hub error: "+err.Error())
+			return
+		}
 	}
-	reqBody["userKey"] = token
-
-	req := protocol.BaseMessage{
-		ID:      uuid.New().String(),
-		Type:    "create_device",
-		Payload: reqBody,
-	}
-
-	if _, err := h.hubClient.SendRequest(req, 5*time.Second); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "Failed to create device: "+err.Error())
-		return
-	}
-	h.writeJSON(w, map[string]interface{}{"success": true})
+	h.writeError(w, http.StatusBadGateway, "hub error or timeout")
 }
 
 // HandleUpdateDevice 处理更新设备
@@ -84,22 +120,53 @@ func (h *DeviceHandler) HandleUpdateDevice(w http.ResponseWriter, r *http.Reques
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	if reqBody == nil {
-		reqBody = map[string]interface{}{}
+	// 优先二进制
+	if h.hubClient != nil && h.hubClient.IsConnected() {
+		item := binproto.DeviceItem{}
+		if v, ok := reqBody["ID"].(float64); ok {
+			item.ID = uint64(v)
+		}
+		if v, ok := reqBody["DeviceUID"].(float64); ok {
+			item.DeviceUID = uint64(v)
+		}
+		if v, ok := reqBody["HardwareID"].(string); ok {
+			item.HardwareID = v
+		}
+		if v, ok := reqBody["Role"].(string); ok {
+			item.Role = v
+		}
+		if v, ok := reqBody["Name"].(string); ok {
+			item.Name = v
+		}
+		if v, ok := reqBody["ParentID"].(float64); ok {
+			vv := uint64(v)
+			item.ParentID = &vv
+		} else if v, ok := reqBody["parentId"].(float64); ok {
+			vv := uint64(v)
+			item.ParentID = &vv
+		}
+		if v, ok := reqBody["OwnerUserID"].(float64); ok {
+			vv := uint64(v)
+			item.OwnerUserID = &vv
+		}
+		payload := binproto.EncodeUpdateDeviceReq(token, item)
+		if resp, err := h.hubClient.SendBinaryRequest(binproto.TypeUpdateDeviceReq, binproto.TypeOKResp, payload, 5*time.Second); err == nil {
+			if _, code, msg, e2 := binproto.DecodeOKResp(resp); e2 == nil {
+				if code == 0 {
+					h.writeJSON(w, map[string]any{"success": true})
+					return
+				}
+				h.writeError(w, http.StatusForbidden, string(msg))
+				return
+			}
+		} else if err == client.ErrTimeout {
+			// 仅超时回退
+		} else {
+			h.writeError(w, http.StatusBadGateway, "hub error: "+err.Error())
+			return
+		}
 	}
-	reqBody["userKey"] = token
-
-	req := protocol.BaseMessage{
-		ID:      uuid.New().String(),
-		Type:    "update_device",
-		Payload: reqBody,
-	}
-
-	if _, err := h.hubClient.SendRequest(req, 5*time.Second); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "Failed to update device: "+err.Error())
-		return
-	}
-	h.writeJSON(w, map[string]interface{}{"success": true})
+	h.writeError(w, http.StatusBadGateway, "hub error or timeout")
 }
 
 // HandleDeleteDevice 处理删除设备
@@ -113,22 +180,30 @@ func (h *DeviceHandler) HandleDeleteDevice(w http.ResponseWriter, r *http.Reques
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	if reqBody == nil {
-		reqBody = map[string]interface{}{}
+	// 优先二进制
+	if h.hubClient != nil && h.hubClient.IsConnected() {
+		var id uint64
+		if v, ok := reqBody["id"].(float64); ok {
+			id = uint64(v)
+		}
+		payload := binproto.EncodeDeleteDeviceReq(id, token)
+		if resp, err := h.hubClient.SendBinaryRequest(binproto.TypeDeleteDeviceReq, binproto.TypeOKResp, payload, 5*time.Second); err == nil {
+			if _, code, msg, e2 := binproto.DecodeOKResp(resp); e2 == nil {
+				if code == 0 {
+					h.writeJSON(w, map[string]any{"success": true})
+					return
+				}
+				h.writeError(w, http.StatusForbidden, string(msg))
+				return
+			}
+		} else if err == client.ErrTimeout {
+			// 仅超时回退
+		} else {
+			h.writeError(w, http.StatusBadGateway, "hub error: "+err.Error())
+			return
+		}
 	}
-	reqBody["userKey"] = token
-
-	req := protocol.BaseMessage{
-		ID:      uuid.New().String(),
-		Type:    "delete_device",
-		Payload: reqBody,
-	}
-
-	if _, err := h.hubClient.SendRequest(req, 5*time.Second); err != nil {
-		h.writeError(w, http.StatusInternalServerError, "Failed to delete device: "+err.Error())
-		return
-	}
-	h.writeJSON(w, map[string]interface{}{"success": true})
+	h.writeError(w, http.StatusBadGateway, "hub error or timeout")
 }
 
 // HandleGetDeviceByID 处理根据ID获取设备

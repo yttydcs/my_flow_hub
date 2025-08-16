@@ -1,13 +1,14 @@
 package client
 
 import (
-	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/url"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"myflowhub/pkg/protocol"
+	binproto "myflowhub/pkg/protocol/binproto"
 
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
@@ -22,12 +23,17 @@ type HubClient struct {
 	managerToken string
 
 	// 消息处理
-	sendCh     chan []byte
-	responseCh chan protocol.BaseMessage
+	// 文本帧/JSON 路径已移除
+	binary bool
+	// binary response multiplexing
+	binRespMu  sync.Mutex
+	binWaiters map[uint64]chan binproto.HeaderV1
+	msgSeq     uint64
 
 	// 连接状态
 	connected bool
 	mu        sync.RWMutex
+	writeMu   sync.Mutex
 
 	// 停止信号
 	stopCh chan struct{}
@@ -38,9 +44,8 @@ func NewHubClient(serverAddr, managerToken string) *HubClient {
 	return &HubClient{
 		serverAddr:   serverAddr,
 		managerToken: managerToken,
-		sendCh:       make(chan []byte, 256),
-		responseCh:   make(chan protocol.BaseMessage, 256),
 		stopCh:       make(chan struct{}),
+		binWaiters:   make(map[uint64]chan binproto.HeaderV1),
 	}
 }
 
@@ -53,17 +58,20 @@ func (c *HubClient) Connect() error {
 
 	log.Info().Str("addr", c.serverAddr).Msg("正在连接到中枢/中继服务器...")
 
-	conn, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+	dialer := *websocket.DefaultDialer
+	dialer.Subprotocols = []string{"myflowhub.bin.v1"}
+	conn, _, err := dialer.Dial(u.String(), http.Header{})
 	if err != nil {
 		return err
 	}
 
 	c.conn = conn
+	c.binary = conn.Subprotocol() == "myflowhub.bin.v1"
 	c.setConnected(true)
 
 	// 启动读写协程
 	go c.readLoop()
-	go c.writeLoop()
+	// 无文本队列写循环，二进制直接写 conn
 
 	// 进行管理员认证
 	if err := c.authenticate(); err != nil {
@@ -77,16 +85,11 @@ func (c *HubClient) Connect() error {
 
 // authenticate 使用管理员令牌进行认证
 func (c *HubClient) authenticate() error {
-	authMsg := protocol.BaseMessage{
-		ID:   "auth-" + time.Now().Format("20060102150405"),
-		Type: "manager_auth",
-		Payload: map[string]interface{}{
-			"token": c.managerToken,
-		},
-		Timestamp: time.Now(),
-	}
-
-	return c.SendMessage(authMsg)
+	// 二进制：发送 ManagerAuthReq 帧
+	payload := binproto.EncodeManagerAuthReq(c.managerToken)
+	h := binproto.HeaderV1{TypeID: binproto.TypeManagerAuthReq, MsgID: c.nextMsgID(), Source: 0, Target: 0, Timestamp: time.Now().UnixMilli()}
+	frame, _ := binproto.EncodeFrame(h, payload)
+	return c.conn.WriteMessage(websocket.BinaryMessage, frame)
 }
 
 // readLoop 读取消息循环
@@ -98,31 +101,120 @@ func (c *HubClient) readLoop() {
 		case <-c.stopCh:
 			return
 		default:
-			var msg protocol.BaseMessage
-			if err := c.conn.ReadJSON(&msg); err != nil {
+			mt, data, err := c.conn.ReadMessage()
+			if err != nil {
 				log.Error().Err(err).Msg("读取消息失败，将尝试重连...")
 				c.conn.Close()
 				c.setConnected(false)
 				go c.reconnect()
 				return
 			}
-
-			log.Debug().Interface("msg", msg).Msg("收到消息")
-
-			// 处理认证响应
-			if msg.Type == "auth_response" || msg.Type == "manager_auth_response" {
-				c.handleAuthResponse(msg)
-				continue // 认证响应不发送到响应通道
+			if mt == websocket.BinaryMessage {
+				if h, pl, err := binproto.DecodeFrame(data); err == nil {
+					// 先存储 payload，再唤醒等待者，避免竞态
+					c.storeLastPayload(h.MsgID, pl)
+					c.binRespMu.Lock()
+					if ch, ok := c.binWaiters[h.MsgID]; ok {
+						delete(c.binWaiters, h.MsgID)
+						c.binRespMu.Unlock()
+						ch <- h
+					} else {
+						c.binRespMu.Unlock()
+					}
+					if h.TypeID == binproto.TypeManagerAuthResp {
+						if _, uid, _, e := binproto.DecodeManagerAuthResp(pl); e == nil {
+							c.deviceID = uid
+							log.Info().Uint64("deviceID", c.deviceID).Msg("管理员(二进制)认证成功")
+						}
+					}
+				}
+				continue
 			}
-
-			// 将非认证消息发送到响应通道
-			select {
-			case c.responseCh <- msg:
-			default:
-				log.Warn().Msg("响应通道已满，丢弃消息")
-			}
+			// 忽略非二进制帧
 		}
 	}
+}
+
+// storeLast holds recent binary payloads by MsgID for short time.
+var binPayloadStore = struct {
+	mu sync.Mutex
+	m  map[uint64][]byte
+}{m: map[uint64][]byte{}}
+
+func (c *HubClient) storeLastPayload(msgID uint64, payload []byte) {
+	binPayloadStore.mu.Lock()
+	defer binPayloadStore.mu.Unlock()
+	cp := make([]byte, len(payload))
+	copy(cp, payload)
+	binPayloadStore.m[msgID] = cp
+	// 简易过期：异步清理
+	go func(id uint64) {
+		time.Sleep(10 * time.Second)
+		binPayloadStore.mu.Lock()
+		delete(binPayloadStore.m, id)
+		binPayloadStore.mu.Unlock()
+	}(msgID)
+}
+func (c *HubClient) loadLastPayload(msgID uint64) ([]byte, bool) {
+	binPayloadStore.mu.Lock()
+	defer binPayloadStore.mu.Unlock()
+	p, ok := binPayloadStore.m[msgID]
+	return p, ok
+}
+
+// SendBinaryRequest 发送二进制请求并等待指定响应类型
+func (c *HubClient) SendBinaryRequest(typeIDReq, typeIDResp uint16, payload []byte, timeout time.Duration) ([]byte, error) {
+	if !c.IsConnected() {
+		return nil, ErrNotConnected
+	}
+	msgID := c.nextMsgID()
+	h := binproto.HeaderV1{TypeID: typeIDReq, MsgID: msgID, Source: c.deviceID, Target: 0, Timestamp: time.Now().UnixMilli()}
+	frame, _ := binproto.EncodeFrame(h, payload)
+	ch := make(chan binproto.HeaderV1, 1)
+	c.binRespMu.Lock()
+	c.binWaiters[msgID] = ch
+	c.binRespMu.Unlock()
+	c.writeMu.Lock()
+	err := c.conn.WriteMessage(websocket.BinaryMessage, frame)
+	c.writeMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case h := <-ch:
+		// 显式处理 ERR 帧
+		if h.TypeID == binproto.TypeErrResp {
+			if p, ok := c.loadLastPayload(h.MsgID); ok {
+				_, code, msg, _ := binproto.DecodeErrResp(p)
+				if len(msg) == 0 {
+					return nil, fmt.Errorf("hub ERR %d", code)
+				}
+				return nil, fmt.Errorf("hub ERR %d: %s", code, string(msg))
+			}
+			return nil, fmt.Errorf("hub ERR")
+		}
+		if h.TypeID != typeIDResp {
+			return nil, fmt.Errorf("unexpected resp type: %d", h.TypeID)
+		}
+		if p, ok := c.loadLastPayload(h.MsgID); ok {
+			return p, nil
+		}
+		return nil, fmt.Errorf("payload missing")
+	case <-time.After(timeout):
+		c.binRespMu.Lock()
+		delete(c.binWaiters, msgID)
+		c.binRespMu.Unlock()
+		return nil, ErrTimeout
+	case <-c.stopCh:
+		return nil, ErrClientClosed
+	}
+}
+
+// nextMsgID 生成全局唯一的消息ID，减少并发冲突
+func (c *HubClient) nextMsgID() uint64 {
+	seq := atomic.AddUint64(&c.msgSeq, 1)
+	// 组合时间与自增序号，降低碰撞概率
+	return (uint64(time.Now().UnixNano()) << 8) ^ seq
 }
 
 // reconnect 自动重连
@@ -143,101 +235,19 @@ func (c *HubClient) reconnect() {
 }
 
 // writeLoop 写入消息循环
-func (c *HubClient) writeLoop() {
-	for {
-		select {
-		case <-c.stopCh:
-			return
-		case data := <-c.sendCh:
-			if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				log.Error().Err(err).Msg("发送消息失败")
-				return
-			}
-		}
-	}
-}
+// 文本写循环已移除（仅二进制）。
 
 // handleAuthResponse 处理认证响应
-func (c *HubClient) handleAuthResponse(msg protocol.BaseMessage) {
-	payload, ok := msg.Payload.(map[string]interface{})
-	if !ok {
-		log.Error().Msg("无效的认证响应格式")
-		return
-	}
-
-	success, _ := payload["success"].(bool)
-	if !success {
-		log.Error().Msg("管理员认证失败")
-		return
-	}
-
-	if deviceID, ok := payload["deviceId"].(float64); ok {
-		c.deviceID = uint64(deviceID)
-		log.Info().Uint64("deviceID", c.deviceID).Msg("管理员认证成功")
-	}
-}
+// JSON 认证响应处理已移除。
 
 // SendMessage 发送消息
-func (c *HubClient) SendMessage(msg protocol.BaseMessage) error {
-	if !c.IsConnected() {
-		return ErrNotConnected
-	}
-
-	// 设置源ID
-	msg.Source = c.deviceID
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return err
-	}
-
-	select {
-	case c.sendCh <- data:
-		return nil
-	default:
-		return ErrSendChannelFull
-	}
-}
+// JSON 消息发送已移除。
 
 // GetResponse 获取响应消息（带超时）
-func (c *HubClient) GetResponse(timeout time.Duration) (*protocol.BaseMessage, error) {
-	select {
-	case msg := <-c.responseCh:
-		return &msg, nil
-	case <-time.After(timeout):
-		return nil, ErrTimeout
-	case <-c.stopCh:
-		return nil, ErrClientClosed
-	}
-}
+// JSON 响应等待已移除。
 
 // SendRequest 发送请求并等待响应
-func (c *HubClient) SendRequest(req protocol.BaseMessage, timeout time.Duration) (*protocol.BaseMessage, error) {
-	if err := c.SendMessage(req); err != nil {
-		return nil, err
-	}
-
-	// 循环接收消息，直到找到匹配的响应
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-
-	for {
-		select {
-		case resp := <-c.responseCh:
-			payload, ok := resp.Payload.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			if originalID, ok := payload["original_id"].(string); ok && originalID == req.ID {
-				return &resp, nil
-			}
-		case <-timer.C:
-			return nil, ErrTimeout
-		case <-c.stopCh:
-			return nil, ErrClientClosed
-		}
-	}
-}
+// JSON 请求-响应已移除。
 
 // IsConnected 检查连接状态
 func (c *HubClient) IsConnected() bool {
@@ -258,6 +268,19 @@ func (c *HubClient) GetDeviceID() uint64 {
 	return c.deviceID
 }
 
+// NextMsgID 暴露下一个消息ID（供外部构造帧时使用）
+func (c *HubClient) NextMsgID() uint64 { return c.nextMsgID() }
+
+// ConnWriteBinary 线程安全地写入二进制帧
+func (c *HubClient) ConnWriteBinary(frame []byte) error {
+	if !c.IsConnected() {
+		return ErrNotConnected
+	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.conn.WriteMessage(websocket.BinaryMessage, frame)
+}
+
 // Close 关闭连接
 func (c *HubClient) Close() error {
 	close(c.stopCh)
@@ -271,8 +294,7 @@ func (c *HubClient) Close() error {
 
 // 错误定义
 var (
-	ErrNotConnected    = fmt.Errorf("not connected to hub")
-	ErrSendChannelFull = fmt.Errorf("send channel is full")
-	ErrTimeout         = fmt.Errorf("operation timeout")
-	ErrClientClosed    = fmt.Errorf("client is closed")
+	ErrNotConnected = fmt.Errorf("not connected to hub")
+	ErrTimeout      = fmt.Errorf("operation timeout")
+	ErrClientClosed = fmt.Errorf("client is closed")
 )

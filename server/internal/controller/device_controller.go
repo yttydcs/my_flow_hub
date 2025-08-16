@@ -1,10 +1,8 @@
 package controller
 
 import (
-	"encoding/json"
+	"fmt"
 	"myflowhub/pkg/database"
-	"myflowhub/pkg/protocol"
-	"myflowhub/server/internal/hub"
 	"myflowhub/server/internal/service"
 )
 
@@ -25,209 +23,115 @@ func NewDeviceController(service *service.DeviceService, perm *service.Permissio
 func (c *DeviceController) SetAuthzService(a *service.AuthzService)         { c.authz = a }
 func (c *DeviceController) SetSystemLogService(s *service.SystemLogService) { c.syslog = s }
 
-// HandleQueryNodes 处理节点查询请求
-func (c *DeviceController) HandleQueryNodes(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	// 如提供 userKey 且已注入 authz，则返回按三来源计算的可见设备
-	if c.authz != nil {
-		if m, ok := msg.Payload.(map[string]interface{}); ok {
-			if uk, ok := m["userKey"].(string); ok && uk != "" {
-				uid, ok := c.authz.ResolveUserIDFromKey(uk)
-				if ok {
-					if ds, err := c.authz.VisibleDevices(uid, client.DeviceID); err == nil {
-						s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": ds})
-						return
-					}
-				}
+// Business methods for binary routes (transport-agnostic)
+func (c *DeviceController) QueryVisibleDevices(userKey string, requesterDeviceUID uint64) ([]database.Device, error) {
+	// 三来源优先
+	if c.authz != nil && userKey != "" {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			if ds, err := c.authz.VisibleDevices(uid, requesterDeviceUID); err == nil {
+				return ds, nil
+			} else {
+				return nil, err
 			}
 		}
+		return nil, fmt.Errorf("unauthorized")
 	}
-	// 兼容旧逻辑：管理员可见全部，否则空
-	if !c.perm.CanAccessAllDevices(client.DeviceID) {
-		s.SendResponse(client, msg.ID, map[string]interface{}{"success": true, "data": []database.Device{}})
-		return
+	// 旧逻辑：管理员设备可见全部，否则空
+	if !c.perm.CanAccessAllDevices(requesterDeviceUID) {
+		return []database.Device{}, nil
 	}
-
-	devices, err := c.service.GetAllDevices()
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "Failed to query nodes")
-		return
-	}
-
-	// 在这里，我们可能需要一个辅助函数来构建设备树，
-	// 或者我们可以直接返回设备列表，让客户端处理。
-	// 为了简单起见，我们暂时直接返回列表。
-	s.SendResponse(client, msg.ID, map[string]interface{}{
-		"success": true,
-		"data":    devices,
-	})
+	return c.service.GetAllDevices()
 }
 
-// HandleCreateDevice 处理创建设备请求
-func (c *DeviceController) HandleCreateDevice(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var payload database.Device
-	jsonPayload, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(jsonPayload, &payload)
-
-	// 支持 userKey：
-	// - 管理员（admin.manage/**）：允许自由创建
-	// - 非管理员：
-	//   * 不得将 OwnerUserID 设为他人；若未设置，则默认为自己
-	//   * 必须指定 ParentID，且对 parent 具备控制权（设备默认/所有权其一满足）
-	if c.authz != nil {
-		if m, ok := msg.Payload.(map[string]interface{}); ok {
-			if uk, ok := m["userKey"].(string); ok && uk != "" {
-				if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok {
-					isAdmin := c.authz.HasUserPermission(uid, "admin.manage")
-					if !isAdmin {
-						// Owner 限制
-						if payload.OwnerUserID != nil {
-							if *payload.OwnerUserID != uid {
-								s.SendErrorResponse(client, msg.ID, "permission denied")
-								return
-							}
-						} else {
-							// 默认归属创建者
-							payload.OwnerUserID = &uid
-						}
-						// 必须指定父设备且具备控制权
-						if payload.ParentID == nil {
-							s.SendErrorResponse(client, msg.ID, "parent required")
-							return
-						}
-						parent, err := c.service.GetDeviceByID(*payload.ParentID)
-						if err != nil {
-							s.SendErrorResponse(client, msg.ID, "parent not found")
-							return
-						}
-						if !c.authz.CanControlDevice(client.DeviceID, parent.DeviceUID, uid) {
-							s.SendErrorResponse(client, msg.ID, "permission denied")
-							return
-						}
+func (c *DeviceController) CreateDevice(userKey string, item database.Device, requesterDeviceUID uint64) error {
+	if c.authz != nil && userKey != "" {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			isAdmin := c.authz.HasUserPermission(uid, "admin.manage")
+			if !isAdmin {
+				if item.OwnerUserID != nil {
+					if *item.OwnerUserID != uid {
+						return fmt.Errorf("permission denied")
 					}
-					goto CREATE_OK
+				} else {
+					item.OwnerUserID = &uid
 				}
-			}
-		}
-	}
-	// 旧逻辑：仅管理员设备可创建
-	if !c.perm.CanManageDevice(client.DeviceID, payload.DeviceUID) {
-		s.SendErrorResponse(client, msg.ID, "permission denied")
-		return
-	}
-CREATE_OK:
-	if err := c.service.CreateDevice(&payload); err != nil {
-		s.SendErrorResponse(client, msg.ID, "Failed to create device")
-		return
-	}
-	if c.syslog != nil {
-		_ = c.syslog.Info("device", "device created", map[string]any{"deviceUID": payload.DeviceUID, "name": payload.Name, "by": client.DeviceID})
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
-}
-
-// HandleUpdateDevice 处理更新设备请求
-func (c *DeviceController) HandleUpdateDevice(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var payload database.Device
-	jsonPayload, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(jsonPayload, &payload)
-	// 若提供 userKey 则按三来源判定；否则退回旧的管理员判定
-	if c.authz != nil {
-		if m, ok := msg.Payload.(map[string]interface{}); ok {
-			if uk, ok := m["userKey"].(string); ok && uk != "" {
-				if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok {
-					isAdmin := c.authz.HasUserPermission(uid, "admin.manage")
-					if !c.authz.CanControlDevice(client.DeviceID, payload.DeviceUID, uid) {
-						s.SendErrorResponse(client, msg.ID, "permission denied")
-						return
-					}
-					if !isAdmin {
-						// 非管理员不得将 OwnerUserID 设为他人
-						if payload.OwnerUserID != nil && *payload.OwnerUserID != uid {
-							s.SendErrorResponse(client, msg.ID, "permission denied")
-							return
-						}
-						// 非管理员如变更 ParentID，必须能控制新父节点
-						if payload.ParentID != nil {
-							parent, err := c.service.GetDeviceByID(*payload.ParentID)
-							if err != nil {
-								s.SendErrorResponse(client, msg.ID, "parent not found")
-								return
-							}
-							if !c.authz.CanControlDevice(client.DeviceID, parent.DeviceUID, uid) {
-								s.SendErrorResponse(client, msg.ID, "permission denied")
-								return
-							}
-						}
-					}
-					goto UPDATE_OK
+				if item.ParentID == nil {
+					return fmt.Errorf("parent required")
 				}
-			}
-		}
-	}
-	if !c.perm.CanManageDevice(client.DeviceID, payload.DeviceUID) {
-		s.SendErrorResponse(client, msg.ID, "permission denied")
-		return
-	}
-UPDATE_OK:
-
-	if err := c.service.UpdateDevice(&payload); err != nil {
-		s.SendErrorResponse(client, msg.ID, "Failed to update device")
-		return
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
-}
-
-// HandleDeleteDevice 处理删除设备请求
-func (c *DeviceController) HandleDeleteDevice(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	payload, ok := msg.Payload.(map[string]interface{})
-	if !ok {
-		return
-	}
-	idf, ok := payload["id"].(float64)
-	if !ok {
-		return
-	}
-	id := uint64(idf)
-
-	// 提升：支持 userKey。删除需具备 admin.manage 或者对目标设备有控制权（且自身拥有者时更安全）。
-	if c.authz != nil {
-		if uk, ok := payload["userKey"].(string); ok && uk != "" {
-			if uid, ok := c.authz.ResolveUserIDFromKey(uk); ok {
-				// 获取目标以判定其 UID
-				target, err := c.service.GetDeviceByID(id)
+				parent, err := c.service.GetDeviceByID(*item.ParentID)
 				if err != nil {
-					s.SendErrorResponse(client, msg.ID, "Device not found")
-					return
+					return fmt.Errorf("parent not found")
 				}
-				// 管理员允许删除；或所有者允许删除自己设备
-				if c.authz.HasUserPermission(uid, "admin.manage") {
-					goto DELETE_OK
+				if !c.authz.CanControlDevice(requesterDeviceUID, parent.DeviceUID, uid) {
+					return fmt.Errorf("permission denied")
 				}
-				// 所有者删除自己
-				if target.OwnerUserID != nil && *target.OwnerUserID == uid {
-					goto DELETE_OK
-				}
-				// 设备默认：请求者是目标或其祖先（谨慎允许，通常删除仍建议管理员/所有者）
-				if c.authz.CanControlDevice(client.DeviceID, target.DeviceUID, uid) && target.OwnerUserID != nil && *target.OwnerUserID == uid {
-					goto DELETE_OK
-				}
-				s.SendErrorResponse(client, msg.ID, "permission denied")
-				return
 			}
+			return c.service.CreateDevice(&item)
 		}
+		return fmt.Errorf("unauthorized")
 	}
-	// 旧逻辑：仅管理员设备可删除
-	if !c.perm.IsAdminDevice(client.DeviceID) {
-		s.SendErrorResponse(client, msg.ID, "permission denied")
-		return
+	if !c.perm.CanManageDevice(requesterDeviceUID, item.DeviceUID) {
+		return fmt.Errorf("permission denied")
 	}
-DELETE_OK:
-	if err := c.service.DeleteDevice(id); err != nil {
-		s.SendErrorResponse(client, msg.ID, "Failed to delete device")
-		return
-	}
-	if c.syslog != nil {
-		_ = c.syslog.Info("device", "device deleted", map[string]any{"id": id, "by": client.DeviceID})
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
+	return c.service.CreateDevice(&item)
 }
+
+func (c *DeviceController) UpdateDevice(userKey string, item database.Device, requesterDeviceUID uint64) error {
+	if c.authz != nil && userKey != "" {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			isAdmin := c.authz.HasUserPermission(uid, "admin.manage")
+			if !c.authz.CanControlDevice(requesterDeviceUID, item.DeviceUID, uid) {
+				return fmt.Errorf("permission denied")
+			}
+			if !isAdmin {
+				if item.OwnerUserID != nil && *item.OwnerUserID != uid {
+					return fmt.Errorf("permission denied")
+				}
+				if item.ParentID != nil {
+					parent, err := c.service.GetDeviceByID(*item.ParentID)
+					if err != nil {
+						return fmt.Errorf("parent not found")
+					}
+					if !c.authz.CanControlDevice(requesterDeviceUID, parent.DeviceUID, uid) {
+						return fmt.Errorf("permission denied")
+					}
+				}
+			}
+			return c.service.UpdateDevice(&item)
+		}
+		return fmt.Errorf("unauthorized")
+	}
+	if !c.perm.CanManageDevice(requesterDeviceUID, item.DeviceUID) {
+		return fmt.Errorf("permission denied")
+	}
+	return c.service.UpdateDevice(&item)
+}
+
+func (c *DeviceController) DeleteDevice(userKey string, id uint64, requesterDeviceUID uint64) error {
+	if c.authz != nil && userKey != "" {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			target, err := c.service.GetDeviceByID(id)
+			if err != nil {
+				return fmt.Errorf("not found")
+			}
+			if c.authz.HasUserPermission(uid, "admin.manage") {
+				return c.service.DeleteDevice(id)
+			}
+			if target.OwnerUserID != nil && *target.OwnerUserID == uid {
+				return c.service.DeleteDevice(id)
+			}
+			if c.authz.CanControlDevice(requesterDeviceUID, target.DeviceUID, uid) && target.OwnerUserID != nil && *target.OwnerUserID == uid {
+				return c.service.DeleteDevice(id)
+			}
+			return fmt.Errorf("permission denied")
+		}
+		return fmt.Errorf("unauthorized")
+	}
+	if !c.perm.IsAdminDevice(requesterDeviceUID) {
+		return fmt.Errorf("permission denied")
+	}
+	return c.service.DeleteDevice(id)
+}
+
+// HandleQueryNodes 处理节点查询请求
+// 所有 JSON 兼容 Handler 已移除，二进制专用

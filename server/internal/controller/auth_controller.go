@@ -3,14 +3,11 @@ package controller
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
-	"myflowhub/pkg/protocol"
-	"myflowhub/server/internal/hub"
+	"fmt"
 	"myflowhub/server/internal/repository"
 	"myflowhub/server/internal/service"
 	"time"
 
-	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -46,233 +43,90 @@ func (c *AuthController) SetUserRepository(u *repository.UserRepository) { c.use
 func (c *AuthController) SetAuditService(a *service.AuditService)         { c.audit = a }
 func (c *AuthController) SetSystemLogService(s *service.SystemLogService) { c.syslog = s }
 
-// HandleAuthRequest 处理常规设备认证请求
-func (c *AuthController) HandleAuthRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var payload protocol.AuthRequestPayload
-	jsonPayload, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(jsonPayload, &payload)
-
-	device, ok := c.authService.AuthenticateDevice(payload.DeviceID, payload.SecretKey)
-	if !ok {
-		log.Warn().Uint64("deviceID", payload.DeviceID).Msg("认证失败")
-		return
-	}
-
-	client.DeviceID = device.DeviceUID
-	s.Clients[client.DeviceID] = client
-	log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中认证成功并注册")
-	if c.syslog != nil {
-		_ = c.syslog.Info("device", "device authenticated",
-			map[string]any{"deviceUID": device.DeviceUID, "ip": client.RemoteAddr, "ua": client.UserAgent})
-	}
-
-	// 更新父级关系并同步变量
-	parentDevice, _ := c.deviceService.GetDeviceByUID(s.DeviceID)
-	if parentDevice != nil {
-		c.deviceService.UpdateDeviceParentID(device.ID, parentDevice.ID)
-	}
-	go c.syncVarsOnLogin(s, client)
-}
-
-// HandleManagerAuthRequest 处理管理员认证请求
-func (c *AuthController) HandleManagerAuthRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	payload, _ := msg.Payload.(map[string]interface{})
-	token, _ := payload["token"].(string)
-
+// AuthenticateManagerToken: 供二进制路由调用的纯业务方法
+func (c *AuthController) AuthenticateManagerToken(token string) (deviceUID uint64, role string, err error) {
 	device, ok := c.authService.AuthenticateManager(token)
 	if !ok {
-		log.Warn().Str("token", token).Msg("管理员认证失败")
-		return
+		return 0, "", fmt.Errorf("unauthorized")
 	}
-
-	client.DeviceID = device.DeviceUID
-	s.Clients[client.DeviceID] = client
-	log.Info().Uint64("clientID", client.DeviceID).Msg("管理员在 Hub 中认证成功并注册")
-
-	s.SendResponse(client, msg.ID, map[string]interface{}{
-		"success":  true,
-		"deviceId": device.DeviceUID,
-		"role":     "manager",
-	})
+	return device.DeviceUID, "manager", nil
 }
 
-// HandleUserLogin 处理用户登录，返回用户会话密钥（key-only 模式）
-func (c *AuthController) HandleUserLogin(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var payload struct {
-		Username  string     `json:"username"`
-		Password  string     `json:"password"`
-		ExpiresAt *time.Time `json:"expiresAt"`
-		MaxUses   *int       `json:"maxUses"`
-	}
-	b, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(b, &payload)
-
+// Login: 用户登录，返回一次性 userKey 与权限
+func (c *AuthController) Login(username, password string) (keyID, userID uint64, secret, uname, displayName string, perms []string, err error) {
 	if c.userRepo == nil || c.keyService == nil {
-		s.SendErrorResponse(client, msg.ID, "login not configured")
-		return
+		return 0, 0, "", "", "", nil, fmt.Errorf("not configured")
 	}
-	// 校验用户名/密码
-	user, err := c.userRepo.FindByUsername(payload.Username)
-	if err != nil || user.Disabled {
-		s.SendErrorResponse(client, msg.ID, "invalid credentials")
-		return
+	user, e := c.userRepo.FindByUsername(username)
+	if e != nil || user.Disabled {
+		return 0, 0, "", "", "", nil, fmt.Errorf("invalid credentials")
 	}
-	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(payload.Password)) != nil {
-		s.SendErrorResponse(client, msg.ID, "invalid credentials")
-		return
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		return 0, 0, "", "", "", nil, fmt.Errorf("invalid credentials")
 	}
-
-	// 生成随机 secret，并创建绑定到 user 的密钥（有效期上限 30 天）
 	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed to issue key")
-		return
+	if _, e := rand.Read(buf); e != nil {
+		return 0, 0, "", "", "", nil, fmt.Errorf("issue failed")
 	}
-	secret := hex.EncodeToString(buf)
-	// 限制最大 30 天
+	secret = hex.EncodeToString(buf)
 	maxExp := time.Now().Add(30 * 24 * time.Hour)
-	var finalExp *time.Time
-	if payload.ExpiresAt == nil || payload.ExpiresAt.After(maxExp) {
-		finalExp = &maxExp
-	} else {
-		finalExp = payload.ExpiresAt
-	}
 	bind := "user"
 	uid := user.ID
-	keyObj, err2 := c.keyService.CreateKey(user.ID, &bind, &uid, secret, finalExp, payload.MaxUses, nil)
-	if err2 != nil {
-		s.SendErrorResponse(client, msg.ID, "failed to issue key")
-		return
+	keyObj, e2 := c.keyService.CreateKey(user.ID, &bind, &uid, secret, &maxExp, nil, nil)
+	if e2 != nil {
+		return 0, 0, "", "", "", nil, fmt.Errorf("issue failed")
 	}
-
-	// 查询权限节点快照
-	perms := []string{}
+	var permNames []string
 	if c.permRepo != nil {
-		if list, err := c.permRepo.ListByUserID(user.ID); err == nil {
+		if list, _ := c.permRepo.ListByUserID(user.ID); len(list) > 0 {
+			permNames = make([]string, 0, len(list))
 			for _, p := range list {
-				perms = append(perms, p.Node)
+				permNames = append(permNames, p.Node)
 			}
 		}
 	}
-	// 系统日志：登录成功
 	if c.syslog != nil {
-		_ = c.syslog.Info("auth", "user login",
-			map[string]any{"userId": user.ID, "username": user.Username, "ip": client.RemoteAddr, "ua": client.UserAgent})
+		_ = c.syslog.Info("auth", "user login", map[string]any{"userId": user.ID})
 	}
-	// 审计：登录成功（保留但后续将独立功能）
 	if c.audit != nil {
-		uid := user.ID
-		_ = c.audit.Write("user", &uid, "user.login", user.Username, "allow", "", "", nil)
+		uid2 := user.ID
+		_ = c.audit.Write("user", &uid2, "user.login", user.Username, "allow", "", "", nil)
 	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{
-		"success":     true,
-		"token":       secret,
-		"keyId":       keyObj.ID,
-		"user":        map[string]interface{}{"id": user.ID, "username": user.Username, "displayName": user.DisplayName},
-		"permissions": perms,
-	})
+	return keyObj.ID, user.ID, secret, user.Username, user.DisplayName, permNames, nil
 }
 
-// HandleUserMe 返回当前 userKey 对应的用户信息与权限
-func (c *AuthController) HandleUserMe(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
+// Me: 根据 userKey 返回用户与权限
+func (c *AuthController) Me(userKey string) (userID uint64, username, displayName string, perms []string, err error) {
 	if c.permRepo == nil || c.userRepo == nil || c.keyService == nil {
-		s.SendErrorResponse(client, msg.ID, "not configured")
-		return
+		return 0, "", "", nil, fmt.Errorf("not configured")
 	}
-	payload, _ := msg.Payload.(map[string]interface{})
-	userKey, _ := payload["userKey"].(string)
-	uid, _, err := c.keyService.PeekUserKey(userKey)
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "invalid key")
-		return
+	uid, _, e := c.keyService.PeekUserKey(userKey)
+	if e != nil || uid == 0 {
+		return 0, "", "", nil, fmt.Errorf("invalid key")
 	}
-	u, err := c.userRepo.FindByID(uid)
-	if err != nil {
-		s.SendErrorResponse(client, msg.ID, "not found")
-		return
+	u, e := c.userRepo.FindByID(uid)
+	if e != nil {
+		return 0, "", "", nil, fmt.Errorf("not found")
 	}
-	perms := []string{}
-	if list, err := c.permRepo.ListByUserID(uid); err == nil {
+	var permNames []string
+	if list, _ := c.permRepo.ListByUserID(u.ID); len(list) > 0 {
+		permNames = make([]string, 0, len(list))
 		for _, p := range list {
-			perms = append(perms, p.Node)
+			permNames = append(permNames, p.Node)
 		}
 	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{
-		"success":     true,
-		"user":        map[string]interface{}{"id": u.ID, "username": u.Username, "displayName": u.DisplayName},
-		"permissions": perms,
-	})
+	return u.ID, u.Username, u.DisplayName, permNames, nil
 }
 
-// HandleUserLogout 撤销当前 userKey
-func (c *AuthController) HandleUserLogout(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	payload, _ := msg.Payload.(map[string]interface{})
-	userKey, _ := payload["userKey"].(string)
+// Logout: 撤销 userKey
+func (c *AuthController) Logout(userKey string) error {
+	if c.keyService == nil {
+		return fmt.Errorf("not configured")
+	}
 	if userKey == "" {
-		s.SendErrorResponse(client, msg.ID, "invalid key")
-		return
+		return fmt.Errorf("invalid key")
 	}
-	// 先解析用户ID用于审计
-	var uidPtr *uint64
-	if c.keyService != nil {
-		if uid, _, err := c.keyService.PeekUserKey(userKey); err == nil && uid != 0 {
-			uidLocal := uid
-			uidPtr = &uidLocal
-		}
-	}
-	if err := c.keyService.DeleteBySecret(userKey); err != nil {
-		s.SendErrorResponse(client, msg.ID, "failed")
-		return
-	}
-	if c.syslog != nil {
-		_ = c.syslog.Info("auth", "user logout", map[string]any{"userId": uidPtr, "ip": client.RemoteAddr, "ua": client.UserAgent})
-	}
-	if c.audit != nil { // 保留
-		_ = c.audit.Write("user", uidPtr, "user.logout", "", "allow", "", "", nil)
-	}
-	s.SendResponse(client, msg.ID, map[string]interface{}{"success": true})
+	return c.keyService.DeleteBySecret(userKey)
 }
 
-// HandleRegisterRequest 处理设备注册请求
-func (c *AuthController) HandleRegisterRequest(s *hub.Server, client *hub.Client, msg protocol.BaseMessage) {
-	var payload protocol.RegisterRequestPayload
-	jsonPayload, _ := json.Marshal(msg.Payload)
-	json.Unmarshal(jsonPayload, &payload)
-
-	device, secretKey, ok := c.authService.RegisterDevice(payload.HardwareID)
-	if !ok {
-		log.Warn().Str("hardwareID", payload.HardwareID).Msg("设备注册失败")
-		return
-	}
-
-	client.DeviceID = device.DeviceUID
-	s.Clients[client.DeviceID] = client
-	log.Info().Uint64("clientID", client.DeviceID).Msg("客户端在 Hub 中注册成功并注册")
-	if c.syslog != nil {
-		_ = c.syslog.Info("device", "device registered",
-			map[string]any{"deviceUID": device.DeviceUID, "hardwareID": payload.HardwareID, "ip": client.RemoteAddr, "ua": client.UserAgent})
-	}
-
-	// 更新父级关系
-	parentDevice, _ := c.deviceService.GetDeviceByUID(s.DeviceID)
-	if parentDevice != nil {
-		c.deviceService.UpdateDeviceParentID(device.ID, parentDevice.ID)
-	}
-
-	s.SendResponse(client, msg.ID, map[string]interface{}{
-		"success":   true,
-		"deviceId":  device.DeviceUID,
-		"secretKey": secretKey,
-	})
-}
-
-// syncVarsOnLogin 客户端上线时同步变量
-func (c *AuthController) syncVarsOnLogin(s *hub.Server, client *hub.Client) {
-	vars, err := c.authService.GetInitialVariablesForDevice(client.DeviceID)
-	if err != nil || len(vars) == 0 {
-		return
-	}
-
-	s.NotifyVarChange(client.DeviceID, s.DeviceID, vars)
-	log.Info().Uint64("clientID", client.DeviceID).Msg("已完成上线变量同步")
-}
+// 所有 JSON 兼容 Handler 已移除，二进制专用

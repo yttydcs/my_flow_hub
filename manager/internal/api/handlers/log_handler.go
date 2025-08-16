@@ -3,11 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"myflowhub/manager/internal/client"
-	"myflowhub/pkg/protocol"
 	"net/http"
 	"time"
 
-	"github.com/google/uuid"
+	binproto "myflowhub/pkg/protocol/binproto"
 )
 
 type LogHandler struct{ hubClient *client.HubClient }
@@ -33,23 +32,27 @@ func (h *LogHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodPost {
 		_ = json.NewDecoder(r.Body).Decode(&body)
 	}
-	payload := map[string]interface{}{
-		"userKey":  token,
-		"keyword":  body.Keyword,
-		"level":    body.Level,
-		"source":   body.Source,
-		"startAt":  body.StartAt,
-		"endAt":    body.EndAt,
-		"page":     body.Page,
-		"pageSize": body.PageSize,
+	// binary first
+	if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeSystemLogListReq, binproto.TypeSystemLogListResp,
+		binproto.EncodeSystemLogListReq(token, body.Level, body.Source, body.Keyword, valueOrZero(body.StartAt), valueOrZero(body.EndAt), int32(body.Page), int32(body.PageSize)), 5*time.Second); err == nil {
+		if reqID, total, page, size, items, derr := binproto.DecodeSystemLogListResp(pld); derr == nil {
+			// map to JSON structure similar to controller output
+			arr := make([]map[string]any, 0, len(items))
+			for _, it := range items {
+				arr = append(arr, map[string]any{"level": it.Level, "source": it.Source, "message": it.Message, "details": it.Details, "at": it.At})
+			}
+			h.writeJSON(w, map[string]any{"success": true, "original_id": reqID, "data": map[string]any{"items": arr, "total": total, "page": page, "size": size}})
+			return
+		}
 	}
-	req := protocol.BaseMessage{ID: uuid.New().String(), Type: "systemlog_list", Payload: payload}
-	resp, err := h.hubClient.SendRequest(req, 5*time.Second)
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, err.Error())
-		return
+	h.writeError(w, http.StatusBadGateway, "hub error or timeout")
+}
+
+func valueOrZero(p *int64) int64 {
+	if p == nil {
+		return 0
 	}
-	h.writeJSON(w, resp.Payload)
+	return *p
 }
 
 func (h *LogHandler) writeJSON(w http.ResponseWriter, data interface{}) {

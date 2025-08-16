@@ -11,7 +11,7 @@ require (
 	gorm.io/gorm v1.30.1
 	myflowhub/pkg/config v0.0.0
 	myflowhub/pkg/database v0.0.0
-	myflowhub/pkg/protocol v0.0.0
+	myflowhub/pkg/protocol/binproto v0.0.0
 )
 
 require (
@@ -36,4 +36,4 @@ replace myflowhub/pkg/config => ../pkg/config
 
 replace myflowhub/pkg/database => ../pkg/database
 
-replace myflowhub/pkg/protocol => ../pkg/protocol
+replace myflowhub/pkg/protocol/binproto => ../pkg/protocol/binproto

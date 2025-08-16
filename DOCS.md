@@ -1,3 +1,5 @@
+> 重要：当前通信仅支持二进制子协议 myflowhub.bin.v1，所有 JSON 路径已移除。Server 二进制路由集中注册于 `server/internal/binroutes/register.go`。
+
 ## 日志（审计）
 
 Manager API
@@ -61,8 +63,7 @@ npm run dev
 
 帧结构
 - Header（固定 38B）：
-	- Magic[2]=0x4D,0x46；Version[1]=0x01；Flags[1]（bit0=压缩可选）
-	- TypeID[2]=uint16；MsgID[8]=uint64；Source[8]=uint64；Target[8]=uint64；Timestamp[8]=int64
+	- TypeID[2]=uint16；Reserved[4]=0；MsgID[8]=uint64；Source[8]=uint64；Target[8]=uint64；Timestamp[8]=int64
 - Payload：按消息 Schema 的固定字段顺序编码；可选位图置于 Payload 开头（如使用）。
 
 编码规则

@@ -21,7 +21,8 @@ func (a *AuthzService) ResolveUserIDFromKey(userKey string) (uint64, bool) {
 	if userKey == "" {
 		return 0, false
 	}
-	uid, _, err := a.keySvc.ValidateUserKey(userKey)
+	// 使用非消耗式校验，避免列表/查询等高频接口迅速耗尽可用次数
+	uid, _, err := a.keySvc.PeekUserKey(userKey)
 	if err != nil {
 		return 0, false
 	}

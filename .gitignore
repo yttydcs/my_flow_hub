@@ -1,0 +1,18 @@
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build caches
+*.log
+dist/
+bin/
+
+# Node
+web/node_modules/
+web/.vite/
+
+# IDE
+.vscode/
+.idea/
