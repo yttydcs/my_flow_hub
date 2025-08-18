@@ -87,7 +87,7 @@ type Key struct {
 	OwnerUserID     *uint64    `gorm:"index"`         // 谁签发的
 	BindSubjectType *string    `gorm:"size:20;index"` // user/device(optional)
 	BindSubjectID   *uint64    `gorm:"index"`
-	SecretHash      string     `gorm:"not null"`
+	SecretHash      string     `gorm:"not null" comment:"sha256(secret), not the secret itself"`
 	ExpiresAt       *time.Time `gorm:"index"`
 	MaxUses         *int
 	RemainingUses   *int

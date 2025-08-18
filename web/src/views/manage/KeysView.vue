@@ -24,8 +24,13 @@
         <n-form-item label="最大使用次数">
           <n-input-number v-model:value="form.maxUses" placeholder="可空" />
         </n-form-item>
+        <n-form-item label="权限节点">
+          <n-input v-model:value="form.nodes" type="textarea" placeholder="可选，多个以英文逗号分隔。默认为空，继承用户所有权限。" />
+        </n-form-item>
         <n-alert v-if="createdSecret" type="success" title="新密钥已生成">
-          请妥善保存：{{ createdSecret }}
+          这是密钥的唯一一次显示，请立即复制并妥善保存。系统将存储其哈希值以供验证。
+          <br/>
+          <strong>{{ createdSecret }}</strong>
         </n-alert>
       </n-form>
       <template #action>
@@ -41,7 +46,7 @@
 <script setup lang="ts">
 import { h, onMounted, ref, reactive, computed } from 'vue'
 import { useMessage, NButton, NButtonGroup, NIcon } from 'naive-ui'
-import { NH2, NSpace, NDataTable, NModal, NForm, NFormItem, NInputNumber, NSelect, NDatePicker, NAlert } from 'naive-ui'
+import { NH2, NSpace, NDataTable, NModal, NForm, NFormItem, NInputNumber, NSelect, NDatePicker, NAlert, NInput } from 'naive-ui'
 import { apiService } from '@/services/api'
 import type { Key } from '@/types/api'
 import { Trash as TrashIcon } from '@vicons/ionicons5'
@@ -53,7 +58,7 @@ const keys = ref<Key[]>([])
 
 const showEdit = ref(false)
 const createdSecret = ref('')
-const form = reactive<{ bindType?: 'user'|'device'; bindId?: number; expiresAtTs?: number | null; maxUses?: number | null }>({ expiresAtTs: null, maxUses: null })
+const form = reactive<{ bindType?: 'user'|'device'; bindId?: number; expiresAtTs?: number | null; maxUses?: number | null; nodes?: string }>({ expiresAtTs: null, maxUses: null, nodes: '' })
 const deviceOptions = ref<{ label: string; value: number }[]>([])
 
 const bindTypeOptions = computed(() => ([
@@ -98,6 +103,7 @@ function openCreate() {
   form.bindId = undefined
   form.expiresAtTs = null
   form.maxUses = null
+  form.nodes = ''
   showEdit.value = true
   loadKeyDevices()
 }
@@ -106,7 +112,8 @@ async function saveKey() {
   saving.value = true
   try {
     const expiresAt = form.expiresAtTs ? new Date(form.expiresAtTs).toISOString() : undefined
-    const res = await apiService.createKey({ bindType: form.bindType, bindId: form.bindId, expiresAt, maxUses: form.maxUses ?? undefined })
+    const nodes = form.nodes ? form.nodes.split(',').map(n => n.trim()).filter(n => n) : []
+    const res = await apiService.createKey({ bindType: form.bindType, bindId: form.bindId, expiresAt, maxUses: form.maxUses ?? undefined, nodes })
     if (res.success) {
       // 后端随 data 返回 secret
       // @ts-ignore

@@ -29,12 +29,6 @@ func NewVariableController(service *service.VariableService, deviceService *serv
 func (c *VariableController) SetAuthzService(a *service.AuthzService) { c.authz = a }
 
 // authzVisibleAsAdmin: 基于用户权限判断是否具备 admin.manage（或 ** 由 HasPermission 内部处理）
-func (c *VariableController) authzVisibleAsAdmin(userID uint64) bool {
-	if c.authz == nil || userID == 0 {
-		return false
-	}
-	return c.authz.HasUserPermission(userID, "admin.manage")
-}
 
 // HandleVarsQuery 处理来自直接客户端的变量查询请求
 // 所有 JSON 兼容 Handler 已移除，二进制专用
@@ -51,18 +45,13 @@ type VarKey struct {
 }
 
 func (c *VariableController) List(userKey string, deviceUID *uint64, requesterDeviceUID uint64) ([]database.DeviceVariable, error) {
-	var requesterUID uint64
-	if c.authz != nil && userKey != "" {
-		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
-			requesterUID = uid
-		}
+	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
+	if !ok {
+		return nil, fmt.Errorf("unauthorized")
 	}
+
 	if deviceUID != nil {
-		if requesterUID != 0 {
-			if !c.authz.CanControlDevice(requesterDeviceUID, *deviceUID, requesterUID) {
-				return nil, fmt.Errorf("permission denied")
-			}
-		} else if !c.perm.CanReadVarsForDevice(requesterDeviceUID, *deviceUID) {
+		if !c.authz.CanControlDevice(requesterDeviceUID, *deviceUID, authCtx) {
 			return nil, fmt.Errorf("permission denied")
 		}
 		dev, e := c.deviceService.GetDeviceByUID(*deviceUID)
@@ -71,26 +60,22 @@ func (c *VariableController) List(userKey string, deviceUID *uint64, requesterDe
 		}
 		return c.service.GetVariablesByDeviceID(dev.ID)
 	}
-	if requesterUID == 0 || !c.authz.HasUserPermission(requesterUID, "admin.manage") {
+
+	if !authCtx.IsAdmin {
 		return nil, fmt.Errorf("permission denied")
 	}
 	return c.service.GetAllVariables()
 }
 
 func (c *VariableController) Update(userKey string, items []VarKV, requesterDeviceUID uint64) (int, error) {
-	var uid uint64
-	if c.authz != nil && userKey != "" {
-		if u, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
-			uid = u
-		}
+	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
+	if !ok {
+		return 0, fmt.Errorf("unauthorized")
 	}
+
 	updated := 0
 	for _, it := range items {
-		if uid != 0 {
-			if !c.authz.CanControlDevice(requesterDeviceUID, it.DeviceUID, uid) {
-				continue
-			}
-		} else if !c.perm.CanWriteVarsForDevice(requesterDeviceUID, it.DeviceUID) {
+		if !c.authz.CanControlDevice(requesterDeviceUID, it.DeviceUID, authCtx) {
 			continue
 		}
 		dev, e := c.deviceService.GetDeviceByUID(it.DeviceUID)
@@ -106,19 +91,14 @@ func (c *VariableController) Update(userKey string, items []VarKV, requesterDevi
 }
 
 func (c *VariableController) Delete(userKey string, items []VarKey, requesterDeviceUID uint64) (int, error) {
-	var uid uint64
-	if c.authz != nil && userKey != "" {
-		if u, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
-			uid = u
-		}
+	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
+	if !ok {
+		return 0, fmt.Errorf("unauthorized")
 	}
+
 	deleted := 0
 	for _, it := range items {
-		if uid != 0 {
-			if !c.authz.CanControlDevice(requesterDeviceUID, it.DeviceUID, uid) {
-				continue
-			}
-		} else if !c.perm.CanWriteVarsForDevice(requesterDeviceUID, it.DeviceUID) {
+		if !c.authz.CanControlDevice(requesterDeviceUID, it.DeviceUID, authCtx) {
 			continue
 		}
 		dev, e := c.deviceService.GetDeviceByUID(it.DeviceUID)

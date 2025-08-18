@@ -31,8 +31,8 @@ func (c *SystemLogController) List(userKey string, req SystemLogListRequest) (*s
 	if c.authz == nil {
 		return nil, fmt.Errorf("not configured")
 	}
-	uid, ok := c.authz.ResolveUserIDFromKey(userKey)
-	if !ok || !(c.authz.HasUserPermission(uid, "log.read") || c.authz.HasUserPermission(uid, "admin.manage")) {
+	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
+	if !ok || !(c.authz.HasPermission(authCtx, "log.read") || authCtx.IsAdmin) {
 		return nil, fmt.Errorf("permission denied")
 	}
 	return c.svc.List(service.SystemLogListInput{

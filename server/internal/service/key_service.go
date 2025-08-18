@@ -50,15 +50,12 @@ func (s *KeyService) ValidateUserKey(secret string) (uint64, *database.Key, erro
 		return 0, nil, errors.New("empty key")
 	}
 	// 兼容：既支持直接存储的明文十六进制 secret，也支持存储为 sha256(secret) 的哈希
-	k, err := s.keys.FindBySecretHash(secret)
+	// 强制使用哈希匹配
+	sum := sha256.Sum256([]byte(secret))
+	hashed := hex.EncodeToString(sum[:])
+	k, err := s.keys.FindBySecretHash(hashed)
 	if err != nil {
-		// 尝试哈希匹配
-		sum := sha256.Sum256([]byte(secret))
-		hashed := hex.EncodeToString(sum[:])
-		k, err = s.keys.FindBySecretHash(hashed)
-		if err != nil {
-			return 0, nil, err
-		}
+		return 0, nil, err
 	}
 	if k.Revoked {
 		return 0, nil, errors.New("revoked")
@@ -92,14 +89,11 @@ func (s *KeyService) PeekUserKey(secret string) (uint64, *database.Key, error) {
 	if secret == "" {
 		return 0, nil, errors.New("empty key")
 	}
-	k, err := s.keys.FindBySecretHash(secret)
+	sum := sha256.Sum256([]byte(secret))
+	hashed := hex.EncodeToString(sum[:])
+	k, err := s.keys.FindBySecretHash(hashed)
 	if err != nil {
-		sum := sha256.Sum256([]byte(secret))
-		hashed := hex.EncodeToString(sum[:])
-		k, err = s.keys.FindBySecretHash(hashed)
-		if err != nil {
-			return 0, nil, err
-		}
+		return 0, nil, err
 	}
 	if k.Revoked {
 		return 0, nil, errors.New("revoked")
@@ -206,12 +200,14 @@ func (s *KeyService) AttachKeyPermissions(ownerUserID uint64, keyID uint64, node
 	if err != nil {
 		return err
 	}
-	allowed := map[string]struct{}{}
+	userPerms := make(map[string]struct{})
 	for _, p := range ups {
-		allowed[p.Node] = struct{}{}
+		userPerms[p.Node] = struct{}{}
 	}
+
+	// 检查要授予的每个节点是否都在用户的权限范围内
 	for _, n := range nodes {
-		if _, ok := allowed[n]; !ok && n != "**" { // 不允许密钥拥有超过用户本身的节点；超级权限必须由用户已具备
+		if !CanGrant(userPerms, n) {
 			return errors.New("key nodes exceed user permissions")
 		}
 	}
