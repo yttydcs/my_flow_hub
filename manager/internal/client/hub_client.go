@@ -29,13 +29,18 @@ type HubClient struct {
 	binWaiters map[uint64]chan binproto.HeaderV1
 	msgSeq     uint64
 	Send       chan []byte
+	// 控制帧：用于通过单写协程发送 Pong，避免与业务写并发
+	pongCh chan string
 
 	// 连接状态
 	connected bool
 	mu        sync.RWMutex
 
-	// 停止信号
-	stopCh chan struct{}
+	// 每次建立新连接时创建的关闭信号，用于结束与该连接相关的 goroutine
+	// 注意：不要在重连之间复用同一个关闭通道，否则会导致新连接的写循环立即退出。
+	connDone chan struct{}
+	// 全局关闭信号：用于终止重连循环与整体客户端
+	quitCh chan struct{}
 }
 
 // NewHubClient 创建新的Hub客户端
@@ -43,8 +48,8 @@ func NewHubClient(serverAddr, managerToken string) *HubClient {
 	return &HubClient{
 		serverAddr:   serverAddr,
 		managerToken: managerToken,
-		stopCh:       make(chan struct{}),
 		binWaiters:   make(map[uint64]chan binproto.HeaderV1),
+		quitCh:       make(chan struct{}),
 	}
 }
 
@@ -68,6 +73,9 @@ func (c *HubClient) Connect() error {
 	c.binary = conn.Subprotocol() == "myflowhub.bin.v1"
 	c.setConnected(true)
 	c.Send = make(chan []byte, 256)
+	// 为本次连接创建独立的关闭信号
+	c.connDone = make(chan struct{})
+	c.pongCh = make(chan string, 8)
 
 	// 启动读写协程
 	go c.writePump()
@@ -97,7 +105,13 @@ func (c *HubClient) authenticate() error {
 func (c *HubClient) readPump() {
 	defer func() {
 		c.setConnected(false)
+		// 先关闭与本连接相关的 goroutine（如 writePump）
+		if c.connDone != nil {
+			close(c.connDone)
+		}
+		// 关闭发送通道以结束写入尝试
 		close(c.Send)
+		// 关闭底层连接
 		c.conn.Close()
 		go c.reconnect()
 	}()
@@ -106,6 +120,17 @@ func (c *HubClient) readPump() {
 	c.conn.SetPongHandler(func(string) error {
 		log.Debug().Msg("readPump: 收到 Pong，重置读超时")
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+	// 自定义 PingHandler：不直接写 Pong，转交给写协程，避免并发写
+	c.conn.SetPingHandler(func(appData string) error {
+		log.Debug().Msg("readPump: 收到 Ping")
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		select {
+		case c.pongCh <- appData:
+		default:
+			// 丢弃过多的 ping，防止阻塞
+		}
 		return nil
 	})
 
@@ -119,6 +144,8 @@ func (c *HubClient) readPump() {
 			log.Error().Err(err).Msg("读取消息失败，将尝试重连...")
 			break
 		}
+		// 每次成功读取都刷新读超时，提升稳健性
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		log.Debug().Int("type", mt).Int("bytes", len(data)).Msg("readPump: 成功读取消息")
 
 		if h, pl, err := binproto.DecodeFrame(data); err == nil {
@@ -190,9 +217,12 @@ func (c *HubClient) SendBinaryRequest(typeIDReq, typeIDResp uint16, payload []by
 	c.binRespMu.Lock()
 	c.binWaiters[msgID] = ch
 	c.binRespMu.Unlock()
+	start := time.Now()
+	log.Debug().Uint64("msgID", msgID).Uint16("typeIDReq", typeIDReq).Dur("timeout", timeout).Msg("SendBinaryRequest: dispatch")
+	// 将请求放入发送队列
 	select {
 	case c.Send <- frame:
-	case <-c.stopCh:
+	case <-c.connDone:
 		return nil, ErrClientClosed
 	}
 	select {
@@ -219,8 +249,9 @@ func (c *HubClient) SendBinaryRequest(typeIDReq, typeIDResp uint16, payload []by
 		c.binRespMu.Lock()
 		delete(c.binWaiters, msgID)
 		c.binRespMu.Unlock()
+		log.Error().Uint64("msgID", msgID).Uint16("typeIDReq", typeIDReq).Dur("elapsed", time.Since(start)).Msg("SendBinaryRequest: timeout")
 		return nil, ErrTimeout
-	case <-c.stopCh:
+	case <-c.connDone:
 		return nil, ErrClientClosed
 	}
 }
@@ -240,7 +271,7 @@ func (c *HubClient) reconnect() {
 	}
 	for {
 		select {
-		case <-c.stopCh:
+		case <-c.quitCh:
 			return
 		default:
 			log.Info().Msg("正在尝试重新连接...")
@@ -257,9 +288,7 @@ func (c *HubClient) reconnect() {
 
 // writePump 将消息从 hub 泵送到 websocket 连接。
 func (c *HubClient) writePump() {
-	ticker := time.NewTicker(pingPeriod)
 	defer func() {
-		ticker.Stop()
 		c.conn.Close()
 	}()
 	for {
@@ -278,14 +307,14 @@ func (c *HubClient) writePump() {
 				return
 			}
 			log.Debug().Int("bytes", len(message)).Msg("writePump: 成功写入消息")
-		case <-ticker.C:
-			log.Debug().Msg("writePump: 发送 Ping...")
+		case appData := <-c.pongCh:
+			// 通过单写协程发送 Pong 控制帧
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Error().Err(err).Msg("writePump: 发送 Ping 失败")
+			if err := c.conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(writeWait)); err != nil {
+				log.Error().Err(err).Msg("writePump: 发送 Pong 失败")
 				return
 			}
-		case <-c.stopCh:
+		case <-c.connDone:
 			return
 		}
 	}
@@ -321,19 +350,31 @@ func (c *HubClient) ConnWriteBinary(frame []byte) error {
 	select {
 	case c.Send <- frame:
 		return nil
-	case <-c.stopCh:
+	case <-c.connDone:
 		return ErrClientClosed
 	}
 }
 
 // Close 关闭连接
 func (c *HubClient) Close() error {
-	close(c.stopCh)
-
+	// 主动关闭当前连接与相关 goroutine，并通知停止重连
+	select {
+	case <-c.quitCh:
+		// 已关闭
+	default:
+		close(c.quitCh)
+	}
+	if c.connDone != nil {
+		select {
+		case <-c.connDone:
+			// 已关闭
+		default:
+			close(c.connDone)
+		}
+	}
 	if c.conn != nil {
 		return c.conn.Close()
 	}
-
 	return nil
 }
 
@@ -345,8 +386,9 @@ var (
 )
 
 const (
-	writeWait      = 30 * time.Second
-	pongWait       = 60 * time.Second
-	pingPeriod     = (pongWait * 9) / 10
-	maxMessageSize = 2048
+	writeWait  = 30 * time.Second
+	pongWait   = 60 * time.Second
+	pingPeriod = (pongWait * 9) / 10
+	// 提高读取上限，避免较大二进制帧触发 read limit exceeded 进而导致 1006/EOF
+	maxMessageSize = 4 * 1024 * 1024 // 4MB
 )

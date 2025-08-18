@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"fmt"
 	bin "myflowhub/pkg/protocol/binproto"
 	"net/http"
 	"regexp"
@@ -99,7 +100,17 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 		// 二进制路径
 		h, payload, err := bin.DecodeFrame(hubMessage.Message)
 		if err != nil {
-			log.Warn().Err(err).Str("remoteAddr", sourceClient.RemoteAddr).Msg("无法解析二进制帧")
+			// 打印十六进制预览与长度，便于定位协议问题
+			previewLen := len(hubMessage.Message)
+			if previewLen > 64 {
+				previewLen = 64
+			}
+			hex := fmt.Sprintf("% x", hubMessage.Message[:previewLen])
+			log.Warn().Err(err).
+				Str("remoteAddr", sourceClient.RemoteAddr).
+				Int("len", len(hubMessage.Message)).
+				Str("hex64", hex).
+				Msg("无法解析二进制帧")
 			return
 		}
 		log.Debug().Uint16("typeID", h.TypeID).Uint64("msgID", h.MsgID).Uint64("source", h.Source).Uint64("target", h.Target).Msg("收到二进制帧")
@@ -171,7 +182,10 @@ func (s *Server) SendBin(c *Client, typeID uint16, msgID uint64, target uint64, 
 	}
 	select {
 	case c.Send <- frame:
+		log.Debug().Uint64("msgID", msgID).Uint16("typeID", typeID).Uint64("target", target).Msg("frame enqueued to client.Send")
 	default:
+		// 队列已满，丢弃并记录
+		log.Warn().Uint64("msgID", msgID).Uint16("typeID", typeID).Uint64("target", target).Int("queueCap", cap(c.Send)).Msg("client.Send full, drop frame")
 	}
 }
 
