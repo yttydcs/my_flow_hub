@@ -57,7 +57,7 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
         - `controller/`: 处理二进制消息（通过适配器），调用服务。
         - `service/`: 封装核心业务逻辑。
         - `repository/`: 数据持久化操作。
-    - 二进制路由注册入口：`server/internal/binroutes/register.go`（集中将 TypeID 绑定到 controller 适配器）。
+    - 二进制路由注册入口：`server/internal/hub/register.go`（集中将 TypeID 绑定到 controller 二进制适配器，由 main 在启动时完成注入）。
     - 父链路连接与认证：`server/internal/hub/parent_connector.go`（优先 ParentAuth，必要时兼容回退到 ManagerAuth）。
 -   **`manager/`**: Go 后台管理服务 (BFF)。
     -   `cmd/manager/main.go`: `main` 包，程序入口。
@@ -138,7 +138,7 @@ Manager 角色澄清：Manager 只是前端的后端（BFF），负责 HTTP→Se
     - 历史数据查询
     - 系统日志查看
 4.  **性能优化**: 
-    - 实现二进制协议支持
+    - 二进制编解码与路由热路径优化（必要处可用代码生成/内联）
     - 添加消息压缩
     - 优化数据库查询性能
 5.  **部署和运维**:

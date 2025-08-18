@@ -9,6 +9,14 @@ Manager 服务提供了 RESTful API 用于管理 MyFlowHub 系统。以下是可
 - 鉴权: 除 `/api/auth/login` 外，其余接口都需要请求头 `Authorization: Bearer <userKey>`（key-only 模式）。
   提示：`/api/auth/login` 返回的 `token` 字段即 userKey 的明文值，请直接作为 Authorization 使用。
 
+### 安全与密钥
+
+- Manager 在系统中只是前端的后端（BFF），不具备系统级特权。
+- 二进制父链路认证（ParentAuth）与管理面登录（ManagerAuth）使用不同的密钥：
+  - ManagerAuth 使用 `Server.ManagerToken`（Manager → Server）。
+  - ParentAuth 使用 `Server.RelayToken`（上级校验）与 `Relay.SharedToken`（下级发起）。
+- 建议将 `RelayToken/SharedToken` 与 `ManagerToken` 分离，避免越权与密钥复用风险。
+
 ## API 端点
 
 ### 1. 健康检查

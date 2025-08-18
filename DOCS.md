@@ -1,4 +1,4 @@
-> 重要：当前通信仅支持二进制子协议 myflowhub.bin.v1，所有 JSON 路径已移除。Server 二进制路由集中注册于 `server/internal/binroutes/register.go`。
+> 重要：当前通信仅支持二进制子协议 myflowhub.bin.v1，所有 JSON 路径已移除。Server 二进制路由集中注册于 `server/internal/hub/register.go`（由 main 在启动时完成注入）。
 
 ## 日志（审计）
 

@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"myflowhub/pkg/config"
 	"myflowhub/pkg/database"
-	"myflowhub/server/internal/binroutes"
 	"myflowhub/server/internal/controller"
 	"myflowhub/server/internal/hub"
 	"myflowhub/server/internal/repository"
@@ -96,15 +95,24 @@ func main() {
 	// 启动前：按策略初始化默认管理员
 	seedDefaultAdmin(userService, permRepo)
 
-	// 使用拆分后的路由注册
-	binroutes.RegisterAuthRoutes(server, authService, deviceService, userRepo, keyService, permRepo)
-	binroutes.RegisterSystemLogRoutes(server, keyService, authzService, systemLogService)
-	binroutes.RegisterDeviceRoutes(server, deviceService, permService, authzService)
-	binroutes.RegisterVariableRoutes(server, variableService, deviceService, permService, authzService)
-	binroutes.RegisterKeyRoutes(server, keyService, permService)
-	binroutes.RegisterKeyDevicesRoute(server, keyService)
-	binroutes.RegisterUserRoutes(server, userService, permService, permRepo, authzService)
-	binroutes.RegisterParentAuth(server)
+	// 创建各域的 Bin 适配器实例
+	ab := &controller.AuthBin{C: authController}
+	db := &controller.DeviceBin{C: deviceController}
+	vb := &controller.VariableBin{C: variableController}
+	kb := &controller.KeyBin{C: keyController}
+	slb := &controller.SystemLogBin{C: systemLogController}
+	ub := &controller.UserBin{Users: userController}
+	pb := &controller.ParentAuthBin{C: controller.NewParentAuthController()}
+
+	// 在 hub 包内注册 TypeID，传入具体处理器以避免循环依赖
+	hub.RegisterAuthRoutes(server, ab.ManagerAuth, ab.UserLogin, ab.UserMe, ab.UserLogout)
+	hub.RegisterSystemLogRoutes(server, slb.List)
+	hub.RegisterDeviceRoutes(server, db.QueryNodes, db.Create, db.Update, db.Delete)
+	hub.RegisterVariableRoutes(server, vb.Update, vb.Delete, vb.List)
+	hub.RegisterKeyRoutes(server, kb.List, kb.Create, kb.Update, kb.Delete)
+	hub.RegisterKeyDevicesRoute(server, kb.Devices)
+	hub.RegisterUserRoutes(server, ub.List, ub.Create, ub.Update, ub.Delete, ub.PermList, ub.PermAdd, ub.PermRemove, ub.SelfUpdate, ub.SelfPassword)
+	hub.RegisterParentAuth(server, pb.Handle)
 
 	server.Start() // 阻塞式启动
 }
