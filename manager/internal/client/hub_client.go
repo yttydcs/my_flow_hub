@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"myflowhub/pkg/config"
 	binproto "myflowhub/pkg/protocol/binproto"
 
 	"github.com/gorilla/websocket"
@@ -53,6 +54,14 @@ func NewHubClient(serverAddr, managerToken string) *HubClient {
 	}
 }
 
+// 从全局配置读取 WS 发送队列容量
+func getWSQueueSize() int {
+	if config.AppConfig.WS.SendQueueSize > 0 {
+		return config.AppConfig.WS.SendQueueSize
+	}
+	return 256
+}
+
 // Connect 连接到中枢/中继服务器
 func (c *HubClient) Connect() error {
 	u, err := url.Parse(c.serverAddr)
@@ -72,7 +81,12 @@ func (c *HubClient) Connect() error {
 	c.conn = conn
 	c.binary = conn.Subprotocol() == "myflowhub.bin.v1"
 	c.setConnected(true)
-	c.Send = make(chan []byte, 256)
+	// 发送队列容量从配置读取，默认 256
+	qsize := 256
+	if cfg := getWSQueueSize(); cfg > 0 {
+		qsize = cfg
+	}
+	c.Send = make(chan []byte, qsize)
 	// 为本次连接创建独立的关闭信号
 	c.connDone = make(chan struct{})
 	c.pongCh = make(chan string, 8)

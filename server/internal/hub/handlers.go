@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"myflowhub/pkg/config"
+
 	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog/log"
 )
@@ -133,7 +135,12 @@ func (s *Server) HandleSubordinateConnection(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	binary := conn.Subprotocol() == "myflowhub.bin.v1" || r.URL.Query().Get("bin") == "1"
-	client := &Client{Hub: s, Conn: conn, Send: make(chan []byte, 256), DeviceID: 0, RemoteAddr: r.RemoteAddr, UserAgent: r.UserAgent(), Binary: binary, pongCh: make(chan string, 8)}
+	// 发送队列容量从配置读取，默认 256
+	qsize := config.AppConfig.WS.SendQueueSize
+	if qsize <= 0 {
+		qsize = 256
+	}
+	client := &Client{Hub: s, Conn: conn, Send: make(chan []byte, qsize), DeviceID: 0, RemoteAddr: r.RemoteAddr, UserAgent: r.UserAgent(), Binary: binary, pongCh: make(chan string, 8)}
 	s.Register <- client
 
 	go client.writePump()

@@ -106,3 +106,28 @@ sequenceDiagram
 4.  **响应（可选）**: 如果需要，响应消息会沿着建立的路径原路返回。
 
 这个机制确保了网络中的任何两个节点，无论它们在树中的位置如何，都可以通过这种“先上行再下行”的模式进行点对点通信。
+
+---
+
+## WebSocket 读写与心跳（实现约束）
+
+### 单写者原则（强制）
+
+- 所有对底层 `*websocket.Conn` 的写操作必须集中在单个写协程中完成（writePump）。
+- 业务/控制器代码不得直接调用 `Conn.WriteMessage/WriteControl`，必须将帧放入发送队列 `client.Send <- frame`，由写协程发送。
+- 这样可以避免 Ping/Pong 控制帧与业务帧的并发写冲突，杜绝 `i/o timeout`、`1006` 等异常断开。
+- 代码约束：
+    - Server 侧：使用 `hub.SendBin(...)` 入队；`controller/sendFrame|sendOK|sendErr` 仅做编码与入队。
+    - Manager 侧：统一通过 `HubClient.Send` 入队；`writePump` 是唯一写者。
+
+### 心跳与超时
+
+- Server 定时发送 Ping；Manager 收到 Ping 仅入队 Pong 由写协程发送。
+- 每次成功读取或收到 Pong 时刷新读超时，提升稳健性。
+
+### 发送队列容量（可配置）
+
+- 统一从配置 `config.json` 读取 `WS.SendQueueSize`，默认 256。
+- Server：为每个客户端创建 `make(chan []byte, SendQueueSize)`。
+- Manager：连接建立时创建 `make(chan []byte, SendQueueSize)`。
+- 可根据并发峰值与内存权衡调整。

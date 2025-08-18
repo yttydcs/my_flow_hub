@@ -36,6 +36,11 @@ type Config struct {
 		HardwareID  string `json:"HardwareID"`
 		SharedToken string `json:"SharedToken"`
 	} `json:"Relay"`
+	// WebSocket 全局配置（server 与 manager 共同使用）
+	WS struct {
+		// Send 队列容量（默认 256）
+		SendQueueSize int `json:"SendQueueSize"`
+	} `json:"WS"`
 }
 
 // AppConfig 是全局配置实例
