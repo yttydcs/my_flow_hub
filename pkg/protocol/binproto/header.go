@@ -3,6 +3,7 @@ package binproto
 import (
 	"encoding/binary"
 	"errors"
+	"unsafe"
 )
 
 // HeaderV1 is the fixed 38-byte header of v1.
@@ -40,7 +41,7 @@ func (h *HeaderV1) Encode(dst []byte) ([]byte, error) {
 	binary.LittleEndian.PutUint64(dst[6:14], h.MsgID)
 	binary.LittleEndian.PutUint64(dst[14:22], h.Source)
 	binary.LittleEndian.PutUint64(dst[22:30], h.Target)
-	binary.LittleEndian.PutUint64(dst[30:38], uint64(h.Timestamp))
+	binary.LittleEndian.PutUint64(dst[30:38], *(*uint64)(unsafe.Pointer(&h.Timestamp)))
 	return dst[:HeaderSizeV1], nil
 }
 
@@ -53,6 +54,7 @@ func (h *HeaderV1) Decode(src []byte) error {
 	h.MsgID = binary.LittleEndian.Uint64(src[6:14])
 	h.Source = binary.LittleEndian.Uint64(src[14:22])
 	h.Target = binary.LittleEndian.Uint64(src[22:30])
-	h.Timestamp = int64(binary.LittleEndian.Uint64(src[30:38]))
+	ts := binary.LittleEndian.Uint64(src[30:38])
+	h.Timestamp = *(*int64)(unsafe.Pointer(&ts))
 	return nil
 }

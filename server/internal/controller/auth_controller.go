@@ -23,25 +23,25 @@ type AuthController struct {
 }
 
 // NewAuthController 创建一个新的 AuthController
-func NewAuthController(authService *service.AuthService, deviceService *service.DeviceService) *AuthController {
+func NewAuthController(
+	authService *service.AuthService,
+	deviceService *service.DeviceService,
+	keyService *service.KeyService,
+	permRepo *repository.PermissionRepository,
+	userRepo *repository.UserRepository,
+	audit *service.AuditService,
+	syslog *service.SystemLogService,
+) *AuthController {
 	return &AuthController{
 		authService:   authService,
 		deviceService: deviceService,
+		keyService:    keyService,
+		permRepo:      permRepo,
+		userRepo:      userRepo,
+		audit:         audit,
+		syslog:        syslog,
 	}
 }
-
-// SetKeyService 注入 KeyService，用于登录签发会话密钥
-func (c *AuthController) SetKeyService(k *service.KeyService) { c.keyService = k }
-
-// SetPermissionRepository 注入权限仓库，用于查询用户权限节点
-func (c *AuthController) SetPermissionRepository(p *repository.PermissionRepository) { c.permRepo = p }
-
-// SetUserRepository 注入用户仓库，用于登录校验
-func (c *AuthController) SetUserRepository(u *repository.UserRepository) { c.userRepo = u }
-
-// SetAuditService 注入审计日志服务
-func (c *AuthController) SetAuditService(a *service.AuditService)         { c.audit = a }
-func (c *AuthController) SetSystemLogService(s *service.SystemLogService) { c.syslog = s }
 
 // AuthenticateManagerToken: 供二进制路由调用的纯业务方法
 func (c *AuthController) AuthenticateManagerToken(token string) (deviceUID uint64, role string, err error) {
@@ -58,11 +58,11 @@ func (c *AuthController) AuthenticateManagerToken(token string) (deviceUID uint6
 
 // Login: 用户登录，返回一次性 userKey 与权限
 func (c *AuthController) Login(username, password string) (keyID, userID uint64, secret, uname, displayName string, perms []string, err error) {
-	if c.userRepo == nil || c.keyService == nil {
-		return 0, 0, "", "", "", nil, fmt.Errorf("not configured")
-	}
 	user, e := c.userRepo.FindByUsername(username)
-	if e != nil || user.Disabled {
+	if e != nil {
+		return 0, 0, "", "", "", nil, fmt.Errorf("invalid credentials")
+	}
+	if user.Disabled {
 		return 0, 0, "", "", "", nil, fmt.Errorf("invalid credentials")
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
@@ -101,9 +101,6 @@ func (c *AuthController) Login(username, password string) (keyID, userID uint64,
 
 // Me: 根据 userKey 返回用户与权限
 func (c *AuthController) Me(userKey string) (userID uint64, username, displayName string, perms []string, err error) {
-	if c.permRepo == nil || c.userRepo == nil || c.keyService == nil {
-		return 0, "", "", nil, fmt.Errorf("not configured")
-	}
 	uid, _, e := c.keyService.PeekUserKey(userKey)
 	if e != nil || uid == 0 {
 		return 0, "", "", nil, fmt.Errorf("invalid key")
@@ -113,10 +110,12 @@ func (c *AuthController) Me(userKey string) (userID uint64, username, displayNam
 		return 0, "", "", nil, fmt.Errorf("not found")
 	}
 	var permNames []string
-	if list, _ := c.permRepo.ListByUserID(u.ID); len(list) > 0 {
-		permNames = make([]string, 0, len(list))
-		for _, p := range list {
-			permNames = append(permNames, p.Node)
+	if u != nil {
+		if list, _ := c.permRepo.ListByUserID(u.ID); len(list) > 0 {
+			permNames = make([]string, 0, len(list))
+			for _, p := range list {
+				permNames = append(permNames, p.Node)
+			}
 		}
 	}
 	return u.ID, u.Username, u.DisplayName, permNames, nil
@@ -124,9 +123,6 @@ func (c *AuthController) Me(userKey string) (userID uint64, username, displayNam
 
 // Logout: 撤销 userKey
 func (c *AuthController) Logout(userKey string) error {
-	if c.keyService == nil {
-		return fmt.Errorf("not configured")
-	}
 	if userKey == "" {
 		return fmt.Errorf("invalid key")
 	}

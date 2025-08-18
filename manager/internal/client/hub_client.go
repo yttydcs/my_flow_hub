@@ -23,17 +23,16 @@ type HubClient struct {
 	managerToken string
 
 	// 消息处理
-	// 文本帧/JSON 路径已移除
 	binary bool
 	// binary response multiplexing
 	binRespMu  sync.Mutex
 	binWaiters map[uint64]chan binproto.HeaderV1
 	msgSeq     uint64
+	Send       chan []byte
 
 	// 连接状态
 	connected bool
 	mu        sync.RWMutex
-	writeMu   sync.Mutex
 
 	// 停止信号
 	stopCh chan struct{}
@@ -68,10 +67,11 @@ func (c *HubClient) Connect() error {
 	c.conn = conn
 	c.binary = conn.Subprotocol() == "myflowhub.bin.v1"
 	c.setConnected(true)
+	c.Send = make(chan []byte, 256)
 
 	// 启动读写协程
-	go c.readLoop()
-	// 无文本队列写循环，二进制直接写 conn
+	go c.writePump()
+	go c.readPump()
 
 	// 进行管理员认证
 	if err := c.authenticate(); err != nil {
@@ -89,58 +89,57 @@ func (c *HubClient) authenticate() error {
 	payload := binproto.EncodeManagerAuthReq(c.managerToken)
 	h := binproto.HeaderV1{TypeID: binproto.TypeManagerAuthReq, MsgID: c.nextMsgID(), Source: 0, Target: 0, Timestamp: time.Now().UnixMilli()}
 	frame, _ := binproto.EncodeFrame(h, payload)
-	return c.conn.WriteMessage(websocket.BinaryMessage, frame)
+	c.Send <- frame
+	return nil
 }
 
-// readLoop 读取消息循环
-func (c *HubClient) readLoop() {
-	defer c.setConnected(false)
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+// readPump 从 websocket 连接将消息泵送到 hub
+func (c *HubClient) readPump() {
+	defer func() {
+		c.setConnected(false)
+		close(c.Send)
+		c.conn.Close()
+		go c.reconnect()
+	}()
+	c.conn.SetReadLimit(maxMessageSize)
+	c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		log.Debug().Msg("readPump: 收到 Pong，重置读超时")
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
 	for {
-		select {
-		case <-c.stopCh:
-			return
-		case <-ticker.C:
-			c.writeMu.Lock()
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Error().Err(err).Msg("发送心跳失败，将尝试重连...")
-				c.conn.Close()
-				c.setConnected(false)
-				go c.reconnect()
-				c.writeMu.Unlock()
-				return
+		log.Debug().Msg("readPump: 等待读取消息...")
+		mt, data, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Error().Err(err).Msg("Unexpected websocket close")
 			}
-			c.writeMu.Unlock()
-		default:
-			mt, data, err := c.conn.ReadMessage()
-			if err != nil {
-				log.Error().Err(err).Msg("读取消息失败，将尝试重连...")
-				c.conn.Close()
-				c.setConnected(false)
-				go c.reconnect()
-				return
-			}
-			if mt == websocket.BinaryMessage {
-				if h, pl, err := binproto.DecodeFrame(data); err == nil {
-					c.storeLastPayload(h.MsgID, pl)
-					c.binRespMu.Lock()
-					if ch, ok := c.binWaiters[h.MsgID]; ok {
-						delete(c.binWaiters, h.MsgID)
-						c.binRespMu.Unlock()
-						ch <- h
-					} else {
-						c.binRespMu.Unlock()
-					}
-					if h.TypeID == binproto.TypeManagerAuthResp {
-						if _, uid, _, e := binproto.DecodeManagerAuthResp(pl); e == nil {
-							c.deviceID = uid
-							log.Info().Uint64("deviceID", c.deviceID).Msg("管理员(二进制)认证成功")
-						}
-					}
+			log.Error().Err(err).Msg("读取消息失败，将尝试重连...")
+			break
+		}
+		log.Debug().Int("type", mt).Int("bytes", len(data)).Msg("readPump: 成功读取消息")
+
+		if h, pl, err := binproto.DecodeFrame(data); err == nil {
+			c.storeLastPayload(h.MsgID, pl)
+			c.binRespMu.Lock()
+			if ch, ok := c.binWaiters[h.MsgID]; ok {
+				delete(c.binWaiters, h.MsgID)
+				c.binRespMu.Unlock()
+				select {
+				case ch <- h:
+				default:
+					log.Warn().Uint64("msgID", h.MsgID).Msg("readPump: 响应无人接收，可能已超时")
 				}
-				continue
+			} else {
+				c.binRespMu.Unlock()
+			}
+			if h.TypeID == binproto.TypeManagerAuthResp {
+				if _, uid, _, e := binproto.DecodeManagerAuthResp(pl); e == nil {
+					c.deviceID = uid
+					log.Info().Uint64("deviceID", c.deviceID).Msg("管理员(二进制)认证成功")
+				}
 			}
 		}
 	}
@@ -148,9 +147,9 @@ func (c *HubClient) readLoop() {
 
 // storeLast holds recent binary payloads by MsgID for short time.
 var binPayloadStore = struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 	m  map[uint64][]byte
-}{m: map[uint64][]byte{}}
+}{m: make(map[uint64][]byte)}
 
 func (c *HubClient) storeLastPayload(msgID uint64, payload []byte) {
 	binPayloadStore.mu.Lock()
@@ -158,19 +157,25 @@ func (c *HubClient) storeLastPayload(msgID uint64, payload []byte) {
 	cp := make([]byte, len(payload))
 	copy(cp, payload)
 	binPayloadStore.m[msgID] = cp
-	// 简易过期：异步清理
-	go func(id uint64) {
-		time.Sleep(10 * time.Second)
+	// Use a single timer to clean up old entries, avoiding goroutine-per-message.
+	time.AfterFunc(15*time.Second, func() {
 		binPayloadStore.mu.Lock()
-		delete(binPayloadStore.m, id)
-		binPayloadStore.mu.Unlock()
-	}(msgID)
+		defer binPayloadStore.mu.Unlock()
+		delete(binPayloadStore.m, msgID)
+	})
 }
+
 func (c *HubClient) loadLastPayload(msgID uint64) ([]byte, bool) {
-	binPayloadStore.mu.Lock()
-	defer binPayloadStore.mu.Unlock()
+	binPayloadStore.mu.RLock()
+	defer binPayloadStore.mu.RUnlock()
 	p, ok := binPayloadStore.m[msgID]
-	return p, ok
+	if !ok {
+		return nil, false
+	}
+	// Return a copy to avoid race conditions if the caller modifies the slice.
+	cp := make([]byte, len(p))
+	copy(cp, p)
+	return cp, true
 }
 
 // SendBinaryRequest 发送二进制请求并等待指定响应类型
@@ -185,11 +190,10 @@ func (c *HubClient) SendBinaryRequest(typeIDReq, typeIDResp uint16, payload []by
 	c.binRespMu.Lock()
 	c.binWaiters[msgID] = ch
 	c.binRespMu.Unlock()
-	c.writeMu.Lock()
-	err := c.conn.WriteMessage(websocket.BinaryMessage, frame)
-	c.writeMu.Unlock()
-	if err != nil {
-		return nil, err
+	select {
+	case c.Send <- frame:
+	case <-c.stopCh:
+		return nil, ErrClientClosed
 	}
 	select {
 	case h := <-ch:
@@ -230,35 +234,62 @@ func (c *HubClient) nextMsgID() uint64 {
 
 // reconnect 自动重连
 func (c *HubClient) reconnect() {
+	// 确保只有一个重连循环在运行
+	if c.IsConnected() {
+		return
+	}
 	for {
 		select {
 		case <-c.stopCh:
 			return
 		default:
 			log.Info().Msg("正在尝试重新连接...")
-			if err := c.Connect(); err == nil {
-				log.Info().Msg("重新连接成功")
-				return
+			if err := c.Connect(); err != nil {
+				log.Error().Err(err).Msg("重连失败")
+				time.Sleep(5 * time.Second)
+				continue
 			}
-			time.Sleep(5 * time.Second)
+			log.Info().Msg("重新连接成功")
+			return
 		}
 	}
 }
 
-// writeLoop 写入消息循环
-// 文本写循环已移除（仅二进制）。
-
-// handleAuthResponse 处理认证响应
-// JSON 认证响应处理已移除。
-
-// SendMessage 发送消息
-// JSON 消息发送已移除。
-
-// GetResponse 获取响应消息（带超时）
-// JSON 响应等待已移除。
-
-// SendRequest 发送请求并等待响应
-// JSON 请求-响应已移除。
+// writePump 将消息从 hub 泵送到 websocket 连接。
+func (c *HubClient) writePump() {
+	ticker := time.NewTicker(pingPeriod)
+	defer func() {
+		ticker.Stop()
+		c.conn.Close()
+	}()
+	for {
+		select {
+		case message, ok := <-c.Send:
+			log.Debug().Int("bytes", len(message)).Msg("writePump: 从 channel 收到消息，准备写入")
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if !ok {
+				// hub 关闭了通道
+				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				log.Info().Msg("writePump: channel 已关闭，正常退出")
+				return
+			}
+			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
+				log.Error().Err(err).Msg("writePump: 写入二进制消息失败")
+				return
+			}
+			log.Debug().Int("bytes", len(message)).Msg("writePump: 成功写入消息")
+		case <-ticker.C:
+			log.Debug().Msg("writePump: 发送 Ping...")
+			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Error().Err(err).Msg("writePump: 发送 Ping 失败")
+				return
+			}
+		case <-c.stopCh:
+			return
+		}
+	}
+}
 
 // IsConnected 检查连接状态
 func (c *HubClient) IsConnected() bool {
@@ -287,9 +318,12 @@ func (c *HubClient) ConnWriteBinary(frame []byte) error {
 	if !c.IsConnected() {
 		return ErrNotConnected
 	}
-	c.writeMu.Lock()
-	defer c.writeMu.Unlock()
-	return c.conn.WriteMessage(websocket.BinaryMessage, frame)
+	select {
+	case c.Send <- frame:
+		return nil
+	case <-c.stopCh:
+		return ErrClientClosed
+	}
 }
 
 // Close 关闭连接
@@ -303,9 +337,16 @@ func (c *HubClient) Close() error {
 	return nil
 }
 
-// 错误定义
+// 错误和常量定义
 var (
 	ErrNotConnected = fmt.Errorf("not connected to hub")
 	ErrTimeout      = fmt.Errorf("operation timeout")
 	ErrClientClosed = fmt.Errorf("client is closed")
+)
+
+const (
+	writeWait      = 30 * time.Second
+	pongWait       = 60 * time.Second
+	pingPeriod     = (pongWait * 9) / 10
+	maxMessageSize = 2048
 )

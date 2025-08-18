@@ -99,9 +99,10 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 		// 二进制路径
 		h, payload, err := bin.DecodeFrame(hubMessage.Message)
 		if err != nil {
-			log.Warn().Err(err).Msg("无法解析二进制帧")
+			log.Warn().Err(err).Str("remoteAddr", sourceClient.RemoteAddr).Msg("无法解析二进制帧")
 			return
 		}
+		log.Debug().Uint16("typeID", h.TypeID).Uint64("msgID", h.MsgID).Uint64("source", h.Source).Uint64("target", h.Target).Msg("收到二进制帧")
 		if handler, ok := s.binRoutes[h.TypeID]; ok {
 			handler(s, sourceClient, h, payload)
 			return
@@ -119,7 +120,9 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 					// 直接转发原始帧
 					select {
 					case client.Send <- hubMessage.Message:
+						log.Debug().Uint64("target", h.Target).Msg("消息已放入目标客户端 channel")
 					default:
+						log.Warn().Uint64("target", h.Target).Msg("目标客户端 channel 已满，消息被丢弃")
 					}
 				} else if s.ParentAddr != "" {
 					s.ParentSend <- hubMessage.Message
@@ -132,7 +135,9 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 					if id != sourceClient.DeviceID {
 						select {
 						case c.Send <- hubMessage.Message:
+							log.Debug().Uint64("target", id).Msg("广播消息已放入目标客户端 channel")
 						default:
+							log.Warn().Uint64("target", id).Msg("目标客户端 channel 已满，广播消息被丢弃")
 						}
 					}
 				}

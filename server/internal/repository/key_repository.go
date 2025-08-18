@@ -20,12 +20,14 @@ func (r *KeyRepository) FindByID(id uint64) (*database.Key, error) {
 
 func (r *KeyRepository) ListAll() ([]database.Key, error) {
 	var ks []database.Key
-	return ks, r.db.Find(&ks).Error
+	err := r.db.Find(&ks).Error
+	return ks, err
 }
 
 func (r *KeyRepository) ListByOwner(ownerID uint64) ([]database.Key, error) {
 	var ks []database.Key
-	return ks, r.db.Where("owner_user_id = ?", ownerID).Find(&ks).Error
+	err := r.db.Where("owner_user_id = ?", ownerID).Find(&ks).Error
+	return ks, err
 }
 
 func (r *KeyRepository) Create(k *database.Key) error {

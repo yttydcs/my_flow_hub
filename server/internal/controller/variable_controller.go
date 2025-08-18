@@ -17,16 +17,14 @@ type VariableController struct {
 }
 
 // NewVariableController 创建一个新的 VariableController
-func NewVariableController(service *service.VariableService, deviceService *service.DeviceService, perm *service.PermissionService) *VariableController {
+func NewVariableController(service *service.VariableService, deviceService *service.DeviceService, perm *service.PermissionService, authz *service.AuthzService) *VariableController {
 	return &VariableController{
 		service:       service,
 		deviceService: deviceService,
 		perm:          perm,
+		authz:         authz,
 	}
 }
-
-// SetAuthzService 可选注入统一授权服务
-func (c *VariableController) SetAuthzService(a *service.AuthzService) { c.authz = a }
 
 // authzVisibleAsAdmin: 基于用户权限判断是否具备 admin.manage（或 ** 由 HasPermission 内部处理）
 func (c *VariableController) authzVisibleAsAdmin(userID uint64) bool {

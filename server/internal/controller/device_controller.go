@@ -15,13 +15,14 @@ type DeviceController struct {
 }
 
 // NewDeviceController 创建一个新的 DeviceController
-func NewDeviceController(service *service.DeviceService, perm *service.PermissionService) *DeviceController {
-	return &DeviceController{service: service, perm: perm}
+func NewDeviceController(service *service.DeviceService, perm *service.PermissionService, authz *service.AuthzService, syslog *service.SystemLogService) *DeviceController {
+	return &DeviceController{
+		service: service,
+		perm:    perm,
+		authz:   authz,
+		syslog:  syslog,
+	}
 }
-
-// SetAuthzService 可选注入统一授权服务
-func (c *DeviceController) SetAuthzService(a *service.AuthzService)         { c.authz = a }
-func (c *DeviceController) SetSystemLogService(s *service.SystemLogService) { c.syslog = s }
 
 // Business methods for binary routes (transport-agnostic)
 func (c *DeviceController) QueryVisibleDevices(userKey string, requesterDeviceUID uint64) ([]database.Device, error) {

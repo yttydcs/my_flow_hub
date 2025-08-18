@@ -50,30 +50,28 @@ func main() {
 	authzService := service.NewAuthzService(keyService, deviceRepo, permRepo)
 
 	// 初始化 controller
-	deviceController := controller.NewDeviceController(deviceService, permService)
-	variableController := controller.NewVariableController(variableService, deviceService, permService)
-	authController := controller.NewAuthController(authService, deviceService)
-	// inject optional services
-	// 仅 key 模式：不再注入 SessionService；login 将返回 key
-	authController.SetPermissionRepository(permRepo)
-	authController.SetKeyService(keyService)
-	authController.SetUserRepository(userRepo)
+	deviceController := controller.NewDeviceController(deviceService, permService, authzService, systemLogService)
+	variableController := controller.NewVariableController(variableService, deviceService, permService, authzService)
+	authController := controller.NewAuthController(
+		authService,
+		deviceService,
+		keyService,
+		permRepo,
+		userRepo,
+		auditService,
+		systemLogService,
+	)
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService, permRepo)
 	keyController := controller.NewKeyController(keyService)
 	logController := controller.NewLogController(auditService)
 	systemLogController := controller.NewSystemLogController(systemLogService)
 	// 将统一授权服务注入设备与变量控制器
-	deviceController.SetAuthzService(authzService)
-	deviceController.SetSystemLogService(systemLogService)
-	variableController.SetAuthzService(authzService)
 	userController.SetAuthzService(authzService)
 	userController.SetAuditService(auditService)
 	logController.SetAuthzService(authzService)
 	systemLogController.SetAuthzService(authzService)
 	keyController.SetAuditService(auditService)
-	authController.SetAuditService(auditService)
-	authController.SetSystemLogService(systemLogService)
 
 	var server *hub.Server
 

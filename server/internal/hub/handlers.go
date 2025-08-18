@@ -63,19 +63,24 @@ func (c *Client) writePump() {
 	for {
 		select {
 		case message, ok := <-c.Send:
+			log.Debug().Uint64("clientID", c.DeviceID).Int("bytes", len(message)).Msg("writePump: 从 channel 收到消息，准备写入")
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				// The hub closed the channel.
 				c.Conn.WriteMessage(websocket.CloseMessage, []byte{})
+				log.Info().Uint64("clientID", c.DeviceID).Msg("writePump: channel 已关闭，正常退出")
 				return
 			}
 			// 发送队列仅用于透传二进制帧
 			if err := c.Conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
+				log.Error().Err(err).Uint64("clientID", c.DeviceID).Msg("writePump: 写入二进制消息失败")
 				return
 			}
+			log.Debug().Uint64("clientID", c.DeviceID).Int("bytes", len(message)).Msg("writePump: 成功写入消息")
 		case <-ticker.C:
 			c.Conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := c.Conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Error().Err(err).Uint64("clientID", c.DeviceID).Msg("writePump: 发送 Ping 失败")
 				return
 			}
 		}
