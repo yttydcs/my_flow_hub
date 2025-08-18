@@ -95,9 +95,14 @@ TypeID 分配（节选）
 - 21 CREATE_DEVICE_REQ：device:Device；可选 user_key:string
 - 22 UPDATE_DEVICE_REQ：device:Device；可选 user_key:string
 - 23 DELETE_DEVICE_REQ：id:u64；可选 user_key:string
-- 101 USER_LOGIN_REQ：username:string，password:string；可选 expires_at:i64，max_uses:i32
-- 102 USER_ME_REQ：user_key:string
-- 103 USER_LOGOUT_REQ：user_key:string
+- 110 USER_LOGIN_REQ：username:string，password:string
+- 111 USER_LOGIN_RESP
+- 112 USER_ME_REQ
+- 113 USER_ME_RESP
+- 114 USER_LOGOUT_REQ
+- 115 USER_LOGOUT_RESP
+- 130 PARENT_AUTH_REQ：version:u8, ts:i64(ms), nonce:16B, hardware_id:len16+str, caps:len16+str, sig:32B(HMAC)
+- 131 PARENT_AUTH_RESP：request_id:u64, device_uid:u64, session_id:16B, heartbeat_sec:u16, perms:[len16+str], exp:i64, sig:32B
 - 150 SYSTEMLOG_LIST_REQ：level:string，source:string，keyword:string，start_at:i64，end_at:i64，page:i32，page_size:i32
 
 结构体示例：Device（作为单字段 struct）
@@ -158,6 +163,28 @@ TypeID 分配（节选）
 - 固定：request_id(u32), token(len16+bytes), username(len16+utf8), role(i32)
 - 可选位图：expires_at(bit0)
 - 可选：expires_at(i64 ms)
+
+---
+
+## 配置说明与安全建议
+
+server/config.json 关键字段
+
+- Server.ListenAddr：核心服务监听地址，如 :8080
+- Server.HardwareID：本节点硬件 ID/唯一名
+- Server.ManagerToken：ManagerAuth 的密钥（Manager→Server 管理面）
+- Server.RelayToken：ParentAuth 校验密钥（上级 Server 用）
+- Server.DefaultAdmin：默认管理员（仅首次建表时生效）
+- Relay.Enabled：以中继模式运行当前进程
+- Relay.ParentAddr：上级 WebSocket 地址（如 ws://hub:8080/ws）
+- Relay.ListenAddr：本地监听给下级的地址
+- Relay.HardwareID：本中继硬件 ID
+- Relay.SharedToken：ParentAuth 发起密钥（下级用）。应与上级 Server.RelayToken 一致
+
+安全建议
+- Manager 仅为 BFF，不具备系统级特权；请将 ManagerToken 与 RelayToken 分离
+- 使用高熵随机值作为 RelayToken/SharedToken；避免在日志与代码中泄露
+- 在完成切换后，尽量不要依赖回退到 ManagerToken 的兼容逻辑
 
 10 MSG_SEND（条件透传）
 - 固定：channel(len16+utf8)
