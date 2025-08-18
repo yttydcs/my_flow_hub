@@ -49,7 +49,6 @@ func (s *KeyService) ValidateUserKey(secret string) (uint64, *database.Key, erro
 	if secret == "" {
 		return 0, nil, errors.New("empty key")
 	}
-	// 兼容：既支持直接存储的明文十六进制 secret，也支持存储为 sha256(secret) 的哈希
 	// 强制使用哈希匹配
 	sum := sha256.Sum256([]byte(secret))
 	hashed := hex.EncodeToString(sum[:])
@@ -89,6 +88,7 @@ func (s *KeyService) PeekUserKey(secret string) (uint64, *database.Key, error) {
 	if secret == "" {
 		return 0, nil, errors.New("empty key")
 	}
+	// 强制使用哈希匹配
 	sum := sha256.Sum256([]byte(secret))
 	hashed := hex.EncodeToString(sum[:])
 	k, err := s.keys.FindBySecretHash(hashed)
@@ -121,14 +121,11 @@ func (s *KeyService) RevokeBySecret(secret string) error {
 	if secret == "" {
 		return errors.New("empty key")
 	}
-	k, err := s.keys.FindBySecretHash(secret)
+	sum := sha256.Sum256([]byte(secret))
+	hashed := hex.EncodeToString(sum[:])
+	k, err := s.keys.FindBySecretHash(hashed)
 	if err != nil {
-		sum := sha256.Sum256([]byte(secret))
-		hashed := hex.EncodeToString(sum[:])
-		k, err = s.keys.FindBySecretHash(hashed)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	k.Revoked = true
 	return s.keys.Update(k)
@@ -139,14 +136,11 @@ func (s *KeyService) DeleteBySecret(secret string) error {
 	if secret == "" {
 		return errors.New("empty key")
 	}
-	k, err := s.keys.FindBySecretHash(secret)
+	sum := sha256.Sum256([]byte(secret))
+	hashed := hex.EncodeToString(sum[:])
+	k, err := s.keys.FindBySecretHash(hashed)
 	if err != nil {
-		sum := sha256.Sum256([]byte(secret))
-		hashed := hex.EncodeToString(sum[:])
-		k, err = s.keys.FindBySecretHash(hashed)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 	return s.keys.Delete(k.ID)
 }
@@ -200,14 +194,12 @@ func (s *KeyService) AttachKeyPermissions(ownerUserID uint64, keyID uint64, node
 	if err != nil {
 		return err
 	}
-	userPerms := make(map[string]struct{})
+	allowed := map[string]struct{}{}
 	for _, p := range ups {
-		userPerms[p.Node] = struct{}{}
+		allowed[p.Node] = struct{}{}
 	}
-
-	// 检查要授予的每个节点是否都在用户的权限范围内
 	for _, n := range nodes {
-		if !CanGrant(userPerms, n) {
+		if _, ok := allowed[n]; !ok && n != "**" { // 不允许密钥拥有超过用户本身的节点；超级权限必须由用户已具备
 			return errors.New("key nodes exceed user permissions")
 		}
 	}

@@ -448,8 +448,8 @@ type UserBin struct{ Users *UserController }
 func (ub *UserBin) List(s *hub.Server, c *hub.Client, h binproto.HeaderV1, payload []byte) {
 	// 要求管理员权限：通过用户密钥判断
 	userKey, _ := binproto.DecodeUserMeReq(payload) // 复用 user_key 解码
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
@@ -472,8 +472,8 @@ func (ub *UserBin) Create(s *hub.Server, c *hub.Client, h binproto.HeaderV1, pay
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
@@ -492,8 +492,8 @@ func (ub *UserBin) Update(s *hub.Server, c *hub.Client, h binproto.HeaderV1, pay
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
@@ -510,8 +510,8 @@ func (ub *UserBin) Delete(s *hub.Server, c *hub.Client, h binproto.HeaderV1, pay
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
@@ -528,8 +528,8 @@ func (ub *UserBin) PermList(s *hub.Server, c *hub.Client, h binproto.HeaderV1, p
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
@@ -552,12 +552,12 @@ func (ub *UserBin) PermAdd(s *hub.Server, c *hub.Client, h binproto.HeaderV1, pa
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
-	if e := ub.Users.permsRepo.AddUserNode(targetID, node, &authCtx.UserID); e != nil {
+	if e := ub.Users.permsRepo.AddUserNode(targetID, node, &uid); e != nil {
 		sendErr(s, c, h, 500, "add failed")
 		return
 	}
@@ -570,8 +570,8 @@ func (ub *UserBin) PermRemove(s *hub.Server, c *hub.Client, h binproto.HeaderV1,
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
-	if !ok || !authCtx.IsAdmin {
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
+	if !ok || !ub.Users.authz.HasUserPermission(uid, "admin.manage") {
 		sendErr(s, c, h, 403, "permission denied")
 		return
 	}
@@ -588,12 +588,11 @@ func (ub *UserBin) SelfUpdate(s *hub.Server, c *hub.Client, h binproto.HeaderV1,
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
 	if !ok {
 		sendErr(s, c, h, 401, "unauthorized")
 		return
 	}
-	uid := authCtx.UserID
 	if e := ub.Users.users.UpdateDisplayName(uid, displayName); e != nil {
 		sendErr(s, c, h, 500, "update failed")
 		return
@@ -607,12 +606,11 @@ func (ub *UserBin) SelfPassword(s *hub.Server, c *hub.Client, h binproto.HeaderV
 		sendErr(s, c, h, 400, "bad request")
 		return
 	}
-	authCtx, ok := ub.Users.authz.ResolveAuthContextFromKey(userKey)
+	uid, ok := ub.Users.authz.ResolveUserIDFromKey(userKey)
 	if !ok {
 		sendErr(s, c, h, 401, "unauthorized")
 		return
 	}
-	uid := authCtx.UserID
 	if e := ub.Users.users.ChangePasswordWithVerify(uid, oldPassword, newPassword); e != nil {
 		sendErr(s, c, h, 400, "change failed")
 		return

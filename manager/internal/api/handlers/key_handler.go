@@ -21,7 +21,7 @@ func (h *KeyHandler) HandleListKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	// 二进制优先
 	if h.hubClient != nil && h.hubClient.IsConnected() {
-		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyListReq, binproto.TypeKeyListResp, binproto.EncodeKeyListReq(token), 10*time.Second); err == nil {
+		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyListReq, binproto.TypeKeyListResp, binproto.EncodeKeyListReq(token), 5*time.Second); err == nil {
 			if _, items, derr := binproto.DecodeKeyListResp(pld); derr == nil {
 				// 直接返回为 { success:true, data:items }
 				h.writeJSON(w, map[string]any{"success": true, "data": items})
@@ -79,7 +79,7 @@ func (h *KeyHandler) HandleCreateKey(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		payload := binproto.EncodeKeyCreateReq(token, bindType, bindID, exp, max, meta, nodes)
-		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyCreateReq, binproto.TypeKeyCreateResp, payload, 10*time.Second); err == nil {
+		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyCreateReq, binproto.TypeKeyCreateResp, payload, 5*time.Second); err == nil {
 			if _, secret, item, nodes, derr := binproto.DecodeKeyCreateResp(pld); derr == nil {
 				h.writeJSON(w, map[string]any{"success": true, "data": item, "secret": secret, "nodes": nodes})
 				return
@@ -148,7 +148,7 @@ func (h *KeyHandler) HandleUpdateKey(w http.ResponseWriter, r *http.Request) {
 			item.Meta = []byte(v)
 		}
 		payload := binproto.EncodeKeyUpdateReq(token, item)
-		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyUpdateReq, binproto.TypeOKResp, payload, 10*time.Second); err == nil {
+		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyUpdateReq, binproto.TypeOKResp, payload, 5*time.Second); err == nil {
 			if _, code, msg, derr := binproto.DecodeOKResp(pld); derr == nil {
 				h.writeJSON(w, map[string]any{"success": code == 0, "message": string(msg)})
 				return
@@ -176,7 +176,7 @@ func (h *KeyHandler) HandleDeleteKey(w http.ResponseWriter, r *http.Request) {
 	// 二进制优先
 	if h.hubClient != nil && h.hubClient.IsConnected() {
 		payload := binproto.EncodeKeyDeleteReq(token, body.ID)
-		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyDeleteReq, binproto.TypeOKResp, payload, 10*time.Second); err == nil {
+		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyDeleteReq, binproto.TypeOKResp, payload, 5*time.Second); err == nil {
 			if _, code, msg, derr := binproto.DecodeOKResp(pld); derr == nil {
 				h.writeJSON(w, map[string]any{"success": code == 0, "message": string(msg)})
 				return
@@ -196,7 +196,7 @@ func (h *KeyHandler) HandleKeyDevices(w http.ResponseWriter, r *http.Request) {
 		token = token[7:]
 	}
 	if h.hubClient != nil && h.hubClient.IsConnected() {
-		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyDevicesReq, binproto.TypeKeyDevicesResp, binproto.EncodeKeyDevicesReq(token), 10*time.Second); err == nil {
+		if pld, err := h.hubClient.SendBinaryRequest(binproto.TypeKeyDevicesReq, binproto.TypeKeyDevicesResp, binproto.EncodeKeyDevicesReq(token), 5*time.Second); err == nil {
 			if _, items, derr := binproto.DecodeKeyDevicesResp(pld); derr == nil {
 				h.writeJSON(w, map[string]any{"success": true, "data": items})
 				return

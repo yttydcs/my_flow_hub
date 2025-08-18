@@ -13,11 +13,10 @@ import (
 type KeyController struct {
 	keys  *service.KeyService
 	audit *service.AuditService
-	authz *service.AuthzService
 }
 
-func NewKeyController(keys *service.KeyService, authz *service.AuthzService) *KeyController {
-	return &KeyController{keys: keys, authz: authz}
+func NewKeyController(keys *service.KeyService) *KeyController {
+	return &KeyController{keys: keys}
 }
 
 // 可选注入审计服务
@@ -27,28 +26,25 @@ func (c *KeyController) SetAuditService(a *service.AuditService) { c.audit = a }
 
 // List returns keys visible to the user represented by userKey.
 func (c *KeyController) List(userKey string) ([]database.Key, error) {
-	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
-	if !ok {
+	if userKey == "" {
 		return nil, fmt.Errorf("unauthorized")
 	}
-	// 权限检查：需要 "key.read" 或管理员权限
-	if !c.authz.HasPermission(authCtx, "key.read") {
-		return nil, fmt.Errorf("forbidden")
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return nil, fmt.Errorf("unauthorized")
 	}
-	return c.keys.ListKeys(authCtx.UserID)
+	return c.keys.ListKeys(uid)
 }
 
 // Create issues a new key bound optionally and returns the generated secret with created key and attached nodes.
 func (c *KeyController) Create(userKey string, bindType *string, bindID *uint64, expiresAt *time.Time, maxUses *int32, meta []byte, nodes []string) (secret string, key *database.Key, outNodes []string, err error) {
-	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
-	if !ok {
+	if userKey == "" {
 		return "", nil, nil, fmt.Errorf("unauthorized")
 	}
-	// 权限检查：需要 "key.create" 或管理员权限
-	if !c.authz.HasPermission(authCtx, "key.create") {
-		return "", nil, nil, fmt.Errorf("forbidden")
+	uid, _, e := c.keys.PeekUserKey(userKey)
+	if e != nil || uid == 0 {
+		return "", nil, nil, fmt.Errorf("unauthorized")
 	}
-
 	// server generates 32-byte random secret
 	buf := make([]byte, 32)
 	if _, e := rand.Read(buf); e != nil {
@@ -65,13 +61,13 @@ func (c *KeyController) Create(userKey string, bindType *string, bindID *uint64,
 		v := int(*maxUses)
 		maxPtr = &v
 	}
-	k, e := c.keys.CreateKey(authCtx.UserID, bindType, bindID, secret, expPtr, maxPtr, meta)
+	k, e := c.keys.CreateKey(uid, bindType, bindID, secret, expPtr, maxPtr, meta)
 	if e != nil {
 		return "", nil, nil, fmt.Errorf("create failed")
 	}
 	if len(nodes) > 0 {
-		if err := c.keys.AttachKeyPermissions(authCtx.UserID, k.ID, nodes); err != nil {
-			return "", nil, nil, fmt.Errorf("invalid key permission nodes: %w", err)
+		if err := c.keys.AttachKeyPermissions(uid, k.ID, nodes); err != nil {
+			return "", nil, nil, fmt.Errorf("invalid key permission nodes")
 		}
 	}
 	return secret, k, nodes, nil
@@ -79,38 +75,39 @@ func (c *KeyController) Create(userKey string, bindType *string, bindID *uint64,
 
 // Update updates a key record, with permissions checked by userKey holder.
 func (c *KeyController) Update(userKey string, item *database.Key) error {
-	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
-	if !ok {
+	if userKey == "" {
 		return fmt.Errorf("unauthorized")
 	}
-	// 权限检查：需要 "key.update" 或管理员权限
-	if !c.authz.HasPermission(authCtx, "key.update") {
-		return fmt.Errorf("forbidden")
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return fmt.Errorf("unauthorized")
 	}
-	return c.keys.UpdateKey(authCtx.UserID, item)
+	return c.keys.UpdateKey(uid, item)
 }
 
 // Delete deletes a key by id with permission checks.
 func (c *KeyController) Delete(userKey string, id uint64) error {
-	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
-	if !ok {
+	// Placeholder for future implementations
+	if userKey == "" {
 		return fmt.Errorf("unauthorized")
 	}
-	// 权限检查：需要 "key.delete" 或管理员权限
-	if !c.authz.HasPermission(authCtx, "key.delete") {
-		return fmt.Errorf("forbidden")
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return fmt.Errorf("unauthorized")
 	}
-	return c.keys.DeleteKey(authCtx.UserID, id)
+	return c.keys.DeleteKey(uid, id)
 }
 
 // VisibleDevices lists devices the user can select when creating a key.
 func (c *KeyController) VisibleDevices(userKey string) ([]database.Device, error) {
-	authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey)
-	if !ok {
+	if userKey == "" {
 		return nil, fmt.Errorf("unauthorized")
 	}
-	// 使用 authCtx 来获取可见设备
-	return c.authz.VisibleDevices(authCtx, 0)
+	uid, _, err := c.keys.PeekUserKey(userKey)
+	if err != nil || uid == 0 {
+		return nil, fmt.Errorf("unauthorized")
+	}
+	return c.keys.ListVisibleDevicesForKey(uid)
 }
 
 // HandleKeyList 按规则返回可见密钥列表

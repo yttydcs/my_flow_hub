@@ -95,11 +95,24 @@ func (c *HubClient) authenticate() error {
 // readLoop 读取消息循环
 func (c *HubClient) readLoop() {
 	defer c.setConnected(false)
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.stopCh:
 			return
+		case <-ticker.C:
+			c.writeMu.Lock()
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.Error().Err(err).Msg("发送心跳失败，将尝试重连...")
+				c.conn.Close()
+				c.setConnected(false)
+				go c.reconnect()
+				c.writeMu.Unlock()
+				return
+			}
+			c.writeMu.Unlock()
 		default:
 			mt, data, err := c.conn.ReadMessage()
 			if err != nil {
@@ -111,7 +124,6 @@ func (c *HubClient) readLoop() {
 			}
 			if mt == websocket.BinaryMessage {
 				if h, pl, err := binproto.DecodeFrame(data); err == nil {
-					// 先存储 payload，再唤醒等待者，避免竞态
 					c.storeLastPayload(h.MsgID, pl)
 					c.binRespMu.Lock()
 					if ch, ok := c.binWaiters[h.MsgID]; ok {
@@ -130,7 +142,6 @@ func (c *HubClient) readLoop() {
 				}
 				continue
 			}
-			// 忽略非二进制帧
 		}
 	}
 }

@@ -175,7 +175,7 @@ class ApiService {
   async getKeys(): Promise<ApiResponse<Key[]>> {
     return this.request<Key[]>('/keys', { method: 'GET' })
   }
-  async createKey(data: { bindType?: 'user' | 'device'; bindId?: number; expiresAt?: string; maxUses?: number; meta?: any; nodes?: string[] }): Promise<ApiResponse<any>> {
+  async createKey(data: { bindType?: 'user' | 'device'; bindId?: number; expiresAt?: string; maxUses?: number; meta?: any }): Promise<ApiResponse<any>> {
     return this.request<any>('/keys', { method: 'POST', body: JSON.stringify(data) })
   }
   async updateKey(data: Partial<Key> & { ID: number }): Promise<ApiResponse> {

@@ -60,7 +60,7 @@ func main() {
 	authController.SetUserRepository(userRepo)
 	_ = permService // reserved for future auth controller checks
 	userController := controller.NewUserController(userService, permService, permRepo)
-	keyController := controller.NewKeyController(keyService, authzService)
+	keyController := controller.NewKeyController(keyService)
 	logController := controller.NewLogController(auditService)
 	systemLogController := controller.NewSystemLogController(systemLogService)
 	// 将统一授权服务注入设备与变量控制器

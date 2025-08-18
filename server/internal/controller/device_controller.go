@@ -27,12 +27,12 @@ func (c *DeviceController) SetSystemLogService(s *service.SystemLogService) { c.
 func (c *DeviceController) QueryVisibleDevices(userKey string, requesterDeviceUID uint64) ([]database.Device, error) {
 	// 三来源优先
 	if c.authz != nil && userKey != "" {
-		if authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey); ok {
-			ds, err := c.authz.VisibleDevices(authCtx, requesterDeviceUID)
-			if err != nil {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			if ds, err := c.authz.VisibleDevices(uid, requesterDeviceUID); err == nil {
+				return ds, nil
+			} else {
 				return nil, err
 			}
-			return ds, nil
 		}
 		return nil, fmt.Errorf("unauthorized")
 	}
@@ -45,14 +45,15 @@ func (c *DeviceController) QueryVisibleDevices(userKey string, requesterDeviceUI
 
 func (c *DeviceController) CreateDevice(userKey string, item database.Device, requesterDeviceUID uint64) error {
 	if c.authz != nil && userKey != "" {
-		if authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey); ok {
-			if !authCtx.IsAdmin {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			isAdmin := c.authz.HasUserPermission(uid, "admin.manage")
+			if !isAdmin {
 				if item.OwnerUserID != nil {
-					if *item.OwnerUserID != authCtx.UserID {
+					if *item.OwnerUserID != uid {
 						return fmt.Errorf("permission denied")
 					}
 				} else {
-					item.OwnerUserID = &authCtx.UserID
+					item.OwnerUserID = &uid
 				}
 				if item.ParentID == nil {
 					return fmt.Errorf("parent required")
@@ -61,7 +62,7 @@ func (c *DeviceController) CreateDevice(userKey string, item database.Device, re
 				if err != nil {
 					return fmt.Errorf("parent not found")
 				}
-				if !c.authz.CanControlDevice(requesterDeviceUID, parent.DeviceUID, authCtx) {
+				if !c.authz.CanControlDevice(requesterDeviceUID, parent.DeviceUID, uid) {
 					return fmt.Errorf("permission denied")
 				}
 			}
@@ -77,12 +78,13 @@ func (c *DeviceController) CreateDevice(userKey string, item database.Device, re
 
 func (c *DeviceController) UpdateDevice(userKey string, item database.Device, requesterDeviceUID uint64) error {
 	if c.authz != nil && userKey != "" {
-		if authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey); ok {
-			if !c.authz.CanControlDevice(requesterDeviceUID, item.DeviceUID, authCtx) {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
+			isAdmin := c.authz.HasUserPermission(uid, "admin.manage")
+			if !c.authz.CanControlDevice(requesterDeviceUID, item.DeviceUID, uid) {
 				return fmt.Errorf("permission denied")
 			}
-			if !authCtx.IsAdmin {
-				if item.OwnerUserID != nil && *item.OwnerUserID != authCtx.UserID {
+			if !isAdmin {
+				if item.OwnerUserID != nil && *item.OwnerUserID != uid {
 					return fmt.Errorf("permission denied")
 				}
 				if item.ParentID != nil {
@@ -90,7 +92,7 @@ func (c *DeviceController) UpdateDevice(userKey string, item database.Device, re
 					if err != nil {
 						return fmt.Errorf("parent not found")
 					}
-					if !c.authz.CanControlDevice(requesterDeviceUID, parent.DeviceUID, authCtx) {
+					if !c.authz.CanControlDevice(requesterDeviceUID, parent.DeviceUID, uid) {
 						return fmt.Errorf("permission denied")
 					}
 				}
@@ -107,18 +109,18 @@ func (c *DeviceController) UpdateDevice(userKey string, item database.Device, re
 
 func (c *DeviceController) DeleteDevice(userKey string, id uint64, requesterDeviceUID uint64) error {
 	if c.authz != nil && userKey != "" {
-		if authCtx, ok := c.authz.ResolveAuthContextFromKey(userKey); ok {
+		if uid, ok := c.authz.ResolveUserIDFromKey(userKey); ok {
 			target, err := c.service.GetDeviceByID(id)
 			if err != nil {
 				return fmt.Errorf("not found")
 			}
-			if authCtx.IsAdmin {
+			if c.authz.HasUserPermission(uid, "admin.manage") {
 				return c.service.DeleteDevice(id)
 			}
-			if target.OwnerUserID != nil && *target.OwnerUserID == authCtx.UserID {
+			if target.OwnerUserID != nil && *target.OwnerUserID == uid {
 				return c.service.DeleteDevice(id)
 			}
-			if c.authz.CanControlDevice(requesterDeviceUID, target.DeviceUID, authCtx) && target.OwnerUserID != nil && *target.OwnerUserID == authCtx.UserID {
+			if c.authz.CanControlDevice(requesterDeviceUID, target.DeviceUID, uid) && target.OwnerUserID != nil && *target.OwnerUserID == uid {
 				return c.service.DeleteDevice(id)
 			}
 			return fmt.Errorf("permission denied")
