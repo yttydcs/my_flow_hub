@@ -41,7 +41,7 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | **其他** | | |
 | 外部化配置 | ✅ 已实现 | 所有关键配置均在 `config.json` 中。 |
 | 权限管理 | ✅ 已实现 | 基于权限节点与通配符，管理员需 admin.manage；支持用户权限编辑与快照下发。 |
-| 二进制协议支持 | ✅ 已实现 | 仅二进制：WebSocket 子协议 myflowhub.bin.v1；JSON 已移除。 |
+| 二进制协议支持 | ✅ 已实现 | 仅二进制：WebSocket 子协议 myflowhub.bin.v1；负载全面使用 Protobuf；JSON 已移除。 |
 | 父链路认证（ParentAuth） | ✅ 已实现 | 使用 HMAC-SHA256 + 时间窗 + Nonce 防重放；密钥使用 RelayToken/SharedToken（与 ManagerToken 解耦）。 |
 
 ## 项目结构

@@ -298,3 +298,72 @@ curl -X POST http://localhost:8090/api/message \
     }
   }'
 ```
+
+---
+
+## Protobuf 负载调试指南（WS 抓包与解析）
+
+自 2025-09 起，Hub 二进制协议的负载改为 Protobuf。以下提供抓包与调试建议：
+
+### 抓包建议
+
+- 使用浏览器开发者工具（Network → WS）或 `mitmproxy/Wireshark` 抓取 WebSocket 二进制帧。
+- 帧头固定 38B（小端）：TypeID(2) + Reserved(4) + MsgID(8) + Source(8) + Target(8) + Timestamp(8)。第 39 字节起为 Protobuf 负载。
+- 关注 TypeID 与 `DOCS.md` 的“TypeID → Protobuf 消息”对照表。
+
+### 负载解码（Go 端验证）
+
+在服务端或本地小程序中，可快速验证某帧负载：
+
+```go
+// p 为去掉帧头后的负载 []byte；以 USER_LOGIN_RESP 为例
+var resp pb.UserLoginResp
+if err := proto.Unmarshal(p, &resp); err != nil {
+    panic(err)
+}
+fmt.Println(resp.GetUserId(), resp.GetUsername(), resp.GetPermissions())
+```
+
+### 负载解码（Node/浏览器）
+
+推荐采用 `ts-proto` 或官方/第三方 protobufjs 生成器基于 `pkg/protocol/pb/myflowhub.proto` 生成前端解码代码：
+
+1) 使用 protobufjs：
+
+```ts
+import { Root } from 'protobufjs';
+
+const root = await Root.load('/path/to/myflowhub.proto');
+const UserLoginResp = root.lookupType('myflowhub.v1.UserLoginResp');
+
+// 去掉 38B 帧头后：
+const payload = new Uint8Array(frame.slice(38));
+const msg = UserLoginResp.decode(payload);
+console.log(UserLoginResp.toObject(msg));
+```
+
+2) 使用 ts-proto 生成声明良好的 TS 类型：
+
+- 生成命令示例（在前端工程中执行）：
+  ```bash
+  protoc \
+    --ts_out=. \
+    --ts_opt=esModuleInterop=true,unrecognizedEnum=false,env=browser \
+    myflowhub.proto
+  ```
+- 使用：
+  ```ts
+  import { myflowhub } from './gen/myflowhub';
+  const m = myflowhub.v1.UserLoginResp.decode(payload);
+  ```
+
+### 常见问题
+
+- 负载长度正常但解码失败：确认是否已去除 38 字节帧头；确认 TypeID 与选择的 pb 消息匹配。
+- optional 字段为零值：proto3 optional 未设置时不会出现在编码里，前端需要判空逻辑。
+- 大包抓包难阅读：建议在服务端/Manager 加日志钩子输出 `protojson.Marshal` 的可读版供调试（仅在开发环境开启）。
+
+### 参考
+
+- `pkg/protocol/pb/myflowhub.proto`：权威 Schema
+- `DOCS.md`：帧头、TypeID 映射与说明

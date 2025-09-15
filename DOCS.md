@@ -21,76 +21,97 @@ Hub 消息
 ```powershell
 # 1) 启动 Server
 cd d:\rj\MyFlowHub\server
-go run .\cmd\myflowhub
-
-# 2) 启动 Manager
-cd d:\rj\MyFlowHub\manager
-go run .\cmd\manager
-
-# 3) 启动 Web（开发）
-cd d:\rj\MyFlowHub\web
-npm install
-npm run dev
-```
-
-## 认证与权限
-
-- 除 /api/auth/login 外，其余管理 API 需 Authorization: Bearer <token>
-- 登录返回 token、user、permissions；前端基于 `admin.manage` 控制管理员页面
-
-## 默认管理员与首启规则
-
-- 仅在“新建数据库或首次创建 users 表”时自动创建 admin，并授予 admin.manage 与 **
-- 已有用户表时不创建、不赋权
-
----
-
-## 二进制协议 v1（固定顺序优先）
+重要：当前通信仅支持二进制子协议 myflowhub.bin.v1，所有 JSON 路径已移除。二进制帧的帧头保持不变，负载部分已全面切换为 Protobuf（proto3）。Server 二进制路由集中注册于 `server/internal/hub/register.go`（由 main 在启动时完成注入）。
 
 目标
 - 高性能、低开销、跨语言易实现。
-- 固定字段顺序为主，不使用键值对；可选字段用位图；支持透传消息。
-- 支持定长数值/浮点、变长字符串/字节、结构体/数组。
+- 帧头与 TypeID 继续沿用；负载为 Protobuf（proto3）编码的消息；支持必要的透传消息。
+- Schema 统一在 `pkg/protocol/pb/myflowhub.proto` 中定义，跨语言生成代码。
 
 传输与字节序
 - WebSocket 二进制帧或 TCP；仅二进制，不保留 JSON。
-- Little-Endian。
-
-握手与目标约定
-- WebSocket 子协议：Sec-WebSocket-Protocol: myflowhub.bin.v1（建议）。
-- HubDeviceUID：连接建立与认证成功后，Hub 会在响应中（如 auth/manager_auth）告知自身 DeviceUID；之后将 Header.Target 设为该 UID 即表示“发往 Hub 本地处理”。
-- 广播：Header.Target=0 表示广播到所有下级客户端；由 Hub 负责转发。
-
+- 帧头字段使用 Little-Endian；负载为 Protobuf（与字节序无关）。
+npm install
 帧结构
 - Header（固定 38B）：
 	- TypeID[2]=uint16；Reserved[4]=0；MsgID[8]=uint64；Source[8]=uint64；Target[8]=uint64；Timestamp[8]=int64
-- Payload：按消息 Schema 的固定字段顺序编码；可选位图置于 Payload 开头（如使用）。
+- Payload：对应 TypeID 的 Protobuf 消息（详见下表）。
 
-编码规则
-- 定长基本类型（不写长度）：bool=1B；i32/u32=4B；i64/u64=8B；f32=4B；f64=8B（IEEE-754）。
+负载规则（Proto）
+- 采用 proto3；可选字段使用 `optional` 语义，未设置时使用零值或省略。
+- 消息字段与命名均以业务含义为主；所有消息定义见 `pkg/protocol/pb/myflowhub.proto`。
+- 跨语言时统一使用 Protobuf 官方或社区生成器；Go 侧由 `google.golang.org/protobuf` 提供运行时。
+- 仅在“新建数据库或首次创建 users 表”时自动创建 admin，并授予 admin.manage 与 **
+长度与 Varint
+- 帧头字段仍为定长小端；负载交由 Protobuf 处理（采用 Varint/定长/长度前缀等内置编码）。
+
+关于可选字段
+- 通过 proto3 optional 表达；具体在 `myflowhub.proto` 中以 `optional` 关键字标注。
+- 高性能、低开销、跨语言易实现。
+TypeID → Protobuf 消息（节选）
+- 0  OK_RESP            → pb.OKResp
+- 1  ERR_RESP           → pb.ErrResp
+- 10 MSG_SEND           → 透传或内部子类型（尽量也使用 Protobuf 定义）
+- 20 QUERY_NODES_REQ    → pb.QueryNodesReq
+- 21 CREATE_DEVICE_REQ  → pb.CreateDeviceReq
+- 22 UPDATE_DEVICE_REQ  → pb.UpdateDeviceReq
+- 23 DELETE_DEVICE_REQ  → pb.DeleteDeviceReq
+- 100 MANAGER_AUTH_REQ  → pb.ManagerAuthReq
+- 101 MANAGER_AUTH_RESP → pb.ManagerAuthResp
+- 110 USER_LOGIN_REQ    → pb.UserLoginReq
+- 111 USER_LOGIN_RESP   → pb.UserLoginResp
+- 112 USER_ME_REQ       → pb.UserMeReq
+- 113 USER_ME_RESP      → pb.UserMeResp
+- 114 USER_LOGOUT_REQ   → pb.UserLogoutReq
+- 115 USER_LOGOUT_RESP  → pb.OKResp/pb.ErrResp（按处理结果）
+- 130 PARENT_AUTH_REQ   → pb.ParentAuthReq（字段长度有固定约束，详见 proto 注释）
+- 131 PARENT_AUTH_RESP  → pb.ParentAuthResp（字段长度有固定约束，详见 proto 注释）
+- 150 SYSTEMLOG_LIST_REQ  → pb.SystemLogListReq
+- 151 SYSTEMLOG_LIST_RESP → pb.SystemLogListResp
+- 170 KEY_LIST_REQ        → pb.KeyListReq
+- 171 KEY_LIST_RESP       → pb.KeyListResp
+- 172 KEY_CREATE_REQ      → pb.KeyCreateReq
+- 173 KEY_CREATE_RESP     → pb.KeyCreateResp
+- 174 KEY_UPDATE_REQ      → pb.KeyUpdateReq
+- 175 KEY_DELETE_REQ      → pb.KeyDeleteReq
+- 176 KEY_DEVICES_REQ     → pb.KeyDevicesReq
+- 177 KEY_DEVICES_RESP    → pb.KeyDevicesResp
+- 180 USER_LIST_REQ       → pb.UserListReq（服务端返回 pb.UserListResp）
+- 181 USER_LIST_RESP      → pb.UserListResp
+- 182 USER_CREATE_REQ     → pb.UserCreateReq（返回 pb.UserCreateResp）
+- 183 USER_CREATE_RESP    → pb.UserCreateResp
+- 184 USER_UPDATE_REQ     → pb.UserUpdateReq
+- 185 USER_DELETE_REQ     → pb.UserDeleteReq
+- 186 USER_PERM_LIST_REQ  → pb.UserPermListReq（返回 pb.UserPermListResp）
+- 187 USER_PERM_LIST_RESP → pb.UserPermListResp
+- 188 USER_PERM_ADD_REQ   → pb.UserPermAddReq
+- 189 USER_PERM_REMOVE_REQ→ pb.UserPermRemoveReq
+- 190 USER_SELF_UPDATE_REQ   → pb.UserSelfUpdateReq
+- 191 USER_SELF_PASSWORD_REQ → pb.UserSelfPasswordReq
+- Little-Endian。
+结构体说明：Device
+- 见 `pb.DeviceItem`；服务侧存在 Go 内部模型与 pb 之间的映射辅助（fromPB/toPB）。
+- WebSocket 子协议：Sec-WebSocket-Protocol: myflowhub.bin.v1（建议）。
+“透传”消息
+- MSG_SEND(10) 仅在 Target≠Hub 时透传；若 Target = Hub，建议也采用 Protobuf 子类型并由 Hub 解析。
+
+文件/媒体传输（建议）
+- 如需文件分片协议，亦建议使用 Protobuf 定义消息结构；TypeID 另行分配。
 - 变长类型：
-	- string/bytes：Len16(u16)+Data；若 Len16=0xFFFF，则再写 Len32(u32)+Data。
-	- array：Count(varint/u16)+逐元素编码（定长直写，变长各自带短长度）。
-	- struct：LenStruct(u16/u32)+内部固定顺序字段（可一次跳过解析）。
+示例帧
+- USER_LOGIN_REQ：负载为 `pb.UserLoginReq{username,password}` 的 Protobuf 二进制；Header.Type=110。
+- 同理，所有请求/响应均对应到上述 `pb.*` 消息。
 - 可选字段位图：ceiling(N/8) 字节，bit0→第1个可选字段…；为 1 则该字段随后的顺序中出现，为 0 则不写。
-- 压缩/校验：大包可按 Flags 开启压缩；如需校验可在 Payload 末尾追加 CRC32/64（默认关闭）。
-
-长度与 Varint 细节
-- Len16：无符号 16 位长度（不含自身），上限 65535；当值为 0xFFFF 时表示“扩展长度”，随后紧跟 Len32（u32）。
+实现要点
+- 以 TypeID → Protobuf 消息 映射为准；解码：读 Header→按 TypeID 将负载 `proto.Unmarshal` 为对应消息；编码：构造 pb.* → `proto.Marshal` 写入负载。
+- 热路径仍可通过消息复用与 `[]byte` 池优化内存拷贝。
 - Len32：无符号 32 位长度（不含自身）。
-- Varint（可用于数组个数等）：7bit 编码，最低 7 位为数据位，最高位为续位标志（1=后续还有字节，0=结束）；小于 128 的数仅 1 字节。
 
-位图示例
 - 某消息有 6 个可选字段 C..H，则位图占 1 字节（ceil(6/8)=1）。
-- 若仅 C、F 出现，位图=0b00100001（bit0=C，bit5=F）。
 - 解码顺序：读位图→读所有必选→按 C..H 顺序，对置位字段依其类型读值，未置位则跳过。
-
-TypeID 分配（节选）
-- 0 OK_RESP：success:bool(=1)
 - 1 ERROR_RESP：success:bool(=0)，error:string，可选 original_id:u64
-- 10 MSG_SEND（条件透传）：
-	- 当 Target ≠ Hub 时：透传 Opaque bytes（Len16/Len32+Data），Hub 不解析，仅路由。
-	- 当 Target = Hub 时：非透传，由 Hub 端对应处理器解析负载（负载布局由具体处理器定义，可为固定顺序字段或内部自定义结构）。
+Schema 参考
+- 全量字段、可选与注释均在 `pkg/protocol/pb/myflowhub.proto` 内维护，作为权威文档。
 - 20 QUERY_NODES_REQ：可选 user_key:string
 - 21 CREATE_DEVICE_REQ：device:Device；可选 user_key:string
 - 22 UPDATE_DEVICE_REQ：device:Device；可选 user_key:string

@@ -1,0 +1,202 @@
+syntax = "proto3";
+package myflowhub.v1;
+option go_package = "myflowhub/pkg/protocol/pb;pb";
+
+// =============================================================
+// 基础应答（通用）
+// TypeID: 0 OK_RESP → OKResp, 1 ERR_RESP → ErrResp
+// 说明：用于承载通用成功/失败与消息文本，message 采用 bytes 以兼容任意编码。
+// =============================================================
+message OKResp {
+  uint64 request_id = 1;
+  int32  code       = 2;
+  bytes  message    = 3;
+}
+
+message ErrResp {
+  uint64 request_id = 1;
+  int32  code       = 2;
+  bytes  message    = 3;
+}
+
+// =============================================================
+// 管理员/登录（用户自助）
+// TypeID: 110/111（登录），112/113（UserMe），114/115（登出）
+// 说明：登录返回 key_id/user_id/secret 以及权限快照。
+// =============================================================
+message ManagerAuthReq { string token = 1; }
+message ManagerAuthResp {
+  uint64 request_id = 1;
+  uint64 device_uid = 2;
+  string role       = 3; // 空串表示无
+}
+
+message UserLoginReq { string username = 1; string password = 2; }
+message UserLoginResp {
+  uint64 request_id   = 1;
+  uint64 key_id       = 2;
+  uint64 user_id      = 3;
+  string secret       = 4;
+  string username     = 5;
+  string display_name = 6;
+  repeated string permissions = 7;
+}
+
+message UserMeReq { string user_key = 1; }
+message UserMeResp {
+  uint64 request_id   = 1;
+  uint64 user_id      = 2;
+  string username     = 3;
+  string display_name = 4;
+  repeated string permissions = 5;
+}
+
+message UserLogoutReq { string user_key = 1; }
+
+// =============================================================
+// 用户管理（管理员）
+// TypeID: 180~191（含权限与自助接口，见下节）
+// =============================================================
+message UserItem {
+  uint64 id = 1;
+  string username = 2;
+  string display_name = 3;
+  bool   disabled = 4;
+  int64  created_at_sec = 5;
+  int64  updated_at_sec = 6;
+}
+message UserListReq { string user_key = 1; }
+message UserListResp { uint64 request_id = 1; repeated UserItem users = 2; }
+message UserCreateReq { string user_key = 1; string username = 2; string display_name = 3; string password = 4; }
+message UserCreateResp { uint64 request_id = 1; uint64 user_id = 2; }
+message UserUpdateReq { string user_key = 1; uint64 id = 2; optional string display_name = 3; optional string password = 4; optional bool disabled = 5; }
+message UserDeleteReq { string user_key = 1; uint64 id = 2; }
+
+// =============================================================
+// 用户权限与自助修改（管理员/用户自助）
+// TypeID: 186/187（权限列表），188（添加），189（移除），190（自助更新），191（自助改密）
+// =============================================================
+message UserPermListReq { string user_key = 1; uint64 user_id = 2; }
+message UserPermListResp { uint64 request_id = 1; repeated string nodes = 2; }
+message UserPermAddReq { string user_key = 1; uint64 user_id = 2; string node = 3; }
+message UserPermRemoveReq { string user_key = 1; uint64 user_id = 2; string node = 3; }
+message UserSelfUpdateReq { string user_key = 1; string display_name = 2; }
+message UserSelfPasswordReq { string user_key = 1; string old_password = 2; string new_password = 3; }
+
+// =============================================================
+// 设备（Device）
+// TypeID: 20/120（查询），21（新建），22（更新），23（删除）
+// =============================================================
+message DeviceItem {
+  uint64 id = 1;
+  uint64 device_uid = 2;
+  string hardware_id = 3;
+  string role = 4;
+  string name = 5;
+  optional uint64 parent_id = 6;
+  optional uint64 owner_user_id = 7;
+  optional int64  last_seen_sec = 8;
+  int64 created_at_sec = 9;
+  int64 updated_at_sec = 10;
+}
+message QueryNodesReq { optional string user_key = 1; }
+message QueryNodesResp { uint64 request_id = 1; repeated DeviceItem devices = 2; }
+message CreateDeviceReq { optional string user_key = 1; DeviceItem device = 2; }
+message UpdateDeviceReq { optional string user_key = 1; DeviceItem device = 2; }
+message DeleteDeviceReq { optional string user_key = 1; uint64 id = 2; }
+
+// =============================================================
+// 变量（Variables）
+// 说明：VarList/VarUpdate/VarDelete
+// =============================================================
+message VarListReq { optional string user_key = 1; optional uint64 device_uid = 2; }
+message VarListItem {
+  uint64 id = 1;
+  uint64 owner_device_id = 2;
+  uint64 owner_device_uid = 3;
+  string name = 4;
+  bytes  value = 5; // JSON bytes
+  int64 created_at_sec = 6;
+  int64 updated_at_sec = 7;
+}
+message VarListResp { uint64 request_id = 1; repeated VarListItem items = 2; }
+message VarUpdateItem { uint64 device_uid = 1; string name = 2; bytes value = 3; }
+message VarUpdateReq { optional string user_key = 1; repeated VarUpdateItem items = 2; }
+message VarDeleteItem { uint64 device_uid = 1; string name = 2; }
+message VarDeleteReq { optional string user_key = 1; repeated VarDeleteItem items = 2; }
+
+// =============================================================
+// Key 管理（发放与查询）
+// 说明：包含绑定主体、到期与次数限制、节点范围等；nodes 为权限节点/设备路径（服务端定义）。
+// =============================================================
+message KeyItem {
+  uint64 id = 1;
+  optional uint64 owner_user_id = 2;
+  optional string bind_subject_type = 3;
+  optional uint64 bind_subject_id = 4;
+  string secret_hash = 5;
+  optional int64  expires_at_sec = 6;
+  optional int32  max_uses = 7;
+  optional int32  remaining_uses = 8;
+  bool   revoked = 9;
+  optional uint64 issued_by = 10;
+  int64  issued_at_sec = 11;
+  bytes  meta = 12;
+}
+message KeyListReq { string user_key = 1; }
+message KeyListResp { uint64 request_id = 1; repeated KeyItem items = 2; }
+message KeyCreateReq {
+  string user_key = 1;
+  optional string bind_subject_type = 2;
+  optional uint64 bind_subject_id = 3;
+  optional int64  expires_at_sec = 4;
+  optional int32  max_uses = 5;
+  bytes meta = 6;
+  repeated string nodes = 7;
+}
+message KeyCreateResp { uint64 request_id = 1; string secret = 2; KeyItem item = 3; repeated string nodes = 4; }
+message KeyUpdateReq { string user_key = 1; KeyItem item = 2; }
+message KeyDeleteReq { string user_key = 1; uint64 id = 2; }
+message KeyDevicesReq { string user_key = 1; }
+message KeyDevicesResp { uint64 request_id = 1; repeated DeviceItem devices = 2; }
+
+// =============================================================
+// 系统日志（SystemLog）
+// TypeID: 150/151
+// 说明：Level/Source/Keyword 任意可选；时间范围允许 0 表示不限。
+// =============================================================
+message SystemLogItem { string level = 1; string source = 2; string message = 3; string details = 4; int64 at = 5; }
+message SystemLogListReq {
+  string user_key = 1;
+  optional string level = 2;
+  optional string source = 3;
+  optional string keyword = 4;
+  int64 start_at = 5; // 允许 0
+  int64 end_at   = 6; // 允许 0
+  int32 page = 7;
+  int32 page_size = 8;
+}
+message SystemLogListResp { uint64 request_id = 1; int64 total = 2; int32 page = 3; int32 page_size = 4; repeated SystemLogItem logs = 5; }
+
+// =============================================================
+// ParentAuth（父链路认证）
+// TypeID: 130/131
+// 说明：字段长度与位宽需严格校验：nonce=16B, sig=32B；heartbeat_sec 仅低 16 位有效。
+// =============================================================
+message ParentAuthReq {
+  uint32 version = 1; // 使用 uint32 以兼容 go 的读取；只占低 8 位
+  int64  ts_ms   = 2;
+  bytes  nonce   = 3; // 16B
+  string hardware_id = 4;
+  string caps        = 5;
+  bytes  sig    = 6; // 32B
+}
+message ParentAuthResp {
+  uint64 request_id = 1;
+  uint64 device_uid = 2;
+  bytes  session_id = 3; // 16B
+  uint32 heartbeat_sec = 4; // 低 16 位有效
+  repeated string perms = 5;
+  int64  exp    = 6;
+  bytes  sig    = 7; // 32B
+}

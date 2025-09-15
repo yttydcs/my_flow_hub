@@ -1,6 +1,8 @@
 module myflowhub/server
 
-go 1.21
+go 1.23
+
+toolchain go1.24.5
 
 require (
 	github.com/google/uuid v1.6.0
@@ -11,6 +13,7 @@ require (
 	gorm.io/gorm v1.30.1
 	myflowhub/pkg/config v0.0.0
 	myflowhub/pkg/database v0.0.0
+	myflowhub/pkg/protocol v0.0.0
 	myflowhub/pkg/protocol/binproto v0.0.0
 )
 
@@ -28,6 +31,7 @@ require (
 	golang.org/x/sync v0.10.0 // indirect
 	golang.org/x/sys v0.28.0 // indirect
 	golang.org/x/text v0.21.0 // indirect
+	google.golang.org/protobuf v1.36.9 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
 	gorm.io/driver/postgres v1.6.0 // indirect
 )
@@ -37,3 +41,5 @@ replace myflowhub/pkg/config => ../pkg/config
 replace myflowhub/pkg/database => ../pkg/database
 
 replace myflowhub/pkg/protocol/binproto => ../pkg/protocol/binproto
+
+replace myflowhub/pkg/protocol => ../pkg/protocol

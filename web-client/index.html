@@ -68,7 +68,9 @@
         </div>
     </div>
 
-    <script>
+    <script src="https://cdn.jsdelivr.net/npm/protobufjs/dist/protobuf.min.js"></script>
+    <script type="module">
+        import { decodeFrame, decodeProtobufPayload, Type } from './protocol.js';
         const connectBtn = document.getElementById('connect-btn');
         const sendMsgBtn = document.getElementById('send-msg-btn');
         const varUpdateBtn = document.getElementById('var-update-btn');
@@ -83,7 +85,7 @@
         const varsQueryInput = document.getElementById('vars-query');
         const logsDiv = document.getElementById('logs');
 
-        let ws;
+    let ws;
 
         function setButtonsDisabled(disabled) {
             sendMsgBtn.disabled = disabled;
@@ -119,7 +121,13 @@
 
         function connect() {
             const url = serverUrlInput.value;
-            ws = new WebSocket(url);
+            try {
+                ws = new WebSocket(url, ['myflowhub.bin.v1']);
+            } catch (_) {
+                // 如果服务器未声明子协议，回退为无子协议
+                ws = new WebSocket(url);
+            }
+            ws.binaryType = 'arraybuffer';
 
             ws.onopen = () => {
                 log('Connected to server.', 'system');
@@ -148,24 +156,36 @@
             };
 
             ws.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                log(`Received: ${JSON.stringify(msg, null, 2)}`, 'received');
+                if (typeof event.data === 'string') {
+                    // 旧 JSON 调试路径（如仍有服务返回文本）
+                    try {
+                        const msg = JSON.parse(event.data);
+                        log(`Received(JSON): ${JSON.stringify(msg, null, 2)}`, 'received');
+                    } catch {
+                        log(`Received(Text): ${event.data}`, 'received');
+                    }
+                    return;
+                }
 
-                if (msg.type === 'register_response' && msg.payload.success) {
-                    const newId = msg.payload.deviceId;
-                    const newSecret = msg.payload.secretKey;
-                    
-                    localStorage.setItem(hardwareIdInput.value + '_deviceId', newId.toString());
-                    localStorage.setItem(hardwareIdInput.value + '_secretKey', newSecret);
-
-                    deviceIdInput.value = newId.toString();
-                    log(`Registration successful! Stored Device ID: ${newId}. You can now send messages.`, 'system');
-                    setButtonsDisabled(false);
-                } else if (msg.type === 'auth_response' && msg.payload.success) {
-                    log('Authentication successful!', 'system');
-                    setButtonsDisabled(false);
-                } else if (msg.type === 'response' && msg.payload.original_id) {
-                    log(`Received response for request ${msg.payload.original_id}`, 'system');
+                // 二进制帧调试路径（Protobuf 负载）
+                const ab = event.data instanceof ArrayBuffer ? event.data : null;
+                if (!ab) {
+                    log('Received non-ArrayBuffer message.', 'error');
+                    return;
+                }
+                try {
+                    const { header, payload } = decodeFrame(ab);
+                    const headerPretty = {
+                        typeID: header.typeID,
+                        msgID: header.msgID?.toString?.() ?? String(header.msgID),
+                        source: header.source?.toString?.() ?? String(header.source),
+                        target: header.target?.toString?.() ?? String(header.target),
+                        timestamp: header.timestamp?.toString?.() ?? String(header.timestamp)
+                    };
+                    const decoded = decodeProtobufPayload(header.typeID, payload);
+                    log(`WS Bin Frame:\n${JSON.stringify({ header: headerPretty, decoded }, null, 2)}`, 'received');
+                } catch (e) {
+                    log(`Decode error: ${e.message}`, 'error');
                 }
             };
 
@@ -179,7 +199,7 @@
                 setButtonsDisabled(true);
                 ws = null;
             };
-        }
+    }
 
         function disconnect() {
             if (ws) {
@@ -187,7 +207,7 @@
             }
         }
 
-        connectBtn.addEventListener('click', () => {
+    connectBtn.addEventListener('click', () => {
             if (ws) {
                 disconnect();
             } else {
