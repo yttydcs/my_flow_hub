@@ -33,15 +33,16 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | BFF 架构 | ✅ 已实现 | `manager` 服务作为前端的后端。 |
 | 特权节点认证 | ✅ 已实现 | `manager` 节点使用 Token 进行注册。 |
 | WebSocket 管理客户端 | ✅ 已实现 | Manager 通过 WebSocket 连接到中枢/中继，并支持自动重连。 |
-| RESTful 管理API | ✅ 已实现 | 提供节点和变量的增删改查、消息发送等API。 |
+| RESTful 管理API | ✅ 已实现 | 提供设备与变量的列表/创建/更新/删除（按 ID 查询与“消息发送”接口将后续提供）。 |
 | 数据统一处理 | ✅ 已实现 | Manager 通过 Server 获取数据，不直接访问数据库。 |
 | 设备父级关系 | ✅ 已实现 | 自动维护设备的层级关系。 |
+| 系统日志查看 | ✅ 已实现 | 提供基础查询（筛选/分页/导出等增强项将后续补强）。 |
 | **工具** | | |
 | Web GUI 调试客户端 | ✅ 已实现 | `web-client/` 目录下的独立HTML文件。 |
 | **其他** | | |
 | 外部化配置 | ✅ 已实现 | 所有关键配置均在 `config.json` 中。 |
 | 权限管理 | ✅ 已实现 | 基于权限节点与通配符，管理员需 admin.manage；支持用户权限编辑与快照下发。 |
-| 二进制协议支持 | ✅ 已实现 | 仅二进制：WebSocket 子协议 myflowhub.bin.v1；负载全面使用 Protobuf；JSON 已移除。 |
+| 二进制协议支持 | ✅ 已实现 | 仅二进制（WS 通道）：WebSocket 子协议 myflowhub.bin.v1；负载全面使用 Protobuf；BFF 的 REST 仍返回 JSON。 |
 | 父链路认证（ParentAuth） | ✅ 已实现 | 使用 HMAC-SHA256 + 时间窗 + Nonce 防重放；密钥使用 RelayToken/SharedToken（与 ManagerToken 解耦）。 |
 
 ## 项目结构
@@ -136,7 +137,6 @@ Manager 角色澄清：Manager 只是前端的后端（BFF），负责 HTTP→Se
     - 实时监控节点状态
     - 批量操作支持
     - 历史数据查询
-    - 系统日志查看
 4.  **性能优化**: 
     - 二进制编解码与路由热路径优化（必要处可用代码生成/内联）
     - 添加消息压缩

@@ -31,11 +31,11 @@ npm run build
 
 ## 目录结构
 
-- src/views/manage/UsersView.vue 用户管理（含权限编辑弹窗）
+ src/views/ManageView.vue 管理页（包含用户管理等）
 - src/stores/auth.ts 登录状态与权限快照
 - src/services/api.ts API 封装，自动附带 token
 
-## 常见问题
+ 管理端通过 manager（BFF）提供的 REST API 工作（默认 http://localhost:8090/api）。
 
 - Windows 下安装失败（EPERM unlink esbuild.exe）：关闭杀软/重启终端后重试；必要时删除 node_modules 与 package-lock.json 重新安装。
 - 报错 run-p 未找到：项目使用 npm-run-all2，确保 npm install 成功；也可直接 npm run build-only 先构建。
