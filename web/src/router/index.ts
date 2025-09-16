@@ -41,6 +41,11 @@ const router = createRouter({
               component: () => import('@/views/manage/KeysView.vue')
             },
             {
+              path: 'approvals',
+              name: 'manage-approvals',
+              component: () => import('@/views/manage/ApprovalsView.vue')
+            },
+            {
               path: 'users',
               name: 'manage-users',
               component: () => import('@/views/manage/UsersView.vue'),

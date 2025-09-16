@@ -149,6 +149,10 @@ func (h *DeviceHandler) HandleUpdateDevice(w http.ResponseWriter, r *http.Reques
 			vv := uint64(v)
 			item.OwnerUserID = &vv
 		}
+		if v, ok := reqBody["Approved"].(bool); ok {
+			vv := v
+			item.Approved = &vv
+		}
 		payload := binproto.EncodeUpdateDeviceReq(token, item)
 		if resp, err := h.hubClient.SendBinaryRequest(binproto.TypeUpdateDeviceReq, binproto.TypeOKResp, payload, 5*time.Second); err == nil {
 			if _, code, msg, e2 := binproto.DecodeOKResp(resp); e2 == nil {

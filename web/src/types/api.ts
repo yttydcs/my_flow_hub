@@ -12,6 +12,7 @@ export interface Device {
   HardwareID: string
   Role: 'hub' | 'relay' | 'node' | 'manager'
   Name: string
+  Approved?: boolean | null
   ParentID?: number | null
   Parent?: Device | null
   Children?: Device[] | null

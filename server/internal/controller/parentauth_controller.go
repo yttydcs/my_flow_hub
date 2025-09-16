@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/binary"
+	"strings"
 	"time"
 
 	"myflowhub/pkg/config"
@@ -44,21 +45,35 @@ func (p *ParentAuthController) VerifyAndAssign(reqTsMs int64, nonce [16]byte, ha
 	p.Nonces[key] = nowMs
 
 	// HMAC 校验：实际签名比对在 Bin 适配器中完成；此处仅进行设备登记
-	return p.ensureDevice(hardwareID)
+	return p.ensureDevice(hardwareID, caps)
 }
 
-func (p *ParentAuthController) ensureDevice(hardwareID string) (uint64, error) {
+func (p *ParentAuthController) ensureDevice(hardwareID, caps string) (uint64, error) {
 	var dev database.Device
 	if err := database.DB.Where("hardware_id = ?", hardwareID).First(&dev).Error; err != nil {
-		dev = database.Device{HardwareID: hardwareID, Role: database.RoleRelay, Name: hardwareID}
+		// 新登记的设备默认未审批，等待 Manager 审批后才能正常使用
+		// 角色：若 caps 中包含 "relay" 则为中继，否则按普通节点处理
+		role := database.RoleNode
+		if strings.Contains(strings.ToLower(caps), "relay") {
+			role = database.RoleRelay
+		}
+		dev = database.Device{HardwareID: hardwareID, Role: role, Name: hardwareID, Approved: false}
 		if e2 := database.DB.Create(&dev).Error; e2 != nil {
 			return 0, e2
 		}
-	}
-	if dev.DeviceUID != 0 {
+		// 确保分配稳定的 DeviceUID（避免 0 导致 Hub 审批查询失配）
+		if dev.DeviceUID == 0 {
+			dev.DeviceUID = dev.ID
+			_ = database.DB.Model(&dev).Update("device_uid", dev.DeviceUID).Error
+		}
 		return dev.DeviceUID, nil
 	}
-	return dev.ID, nil
+	// 兼容旧记录：若 DeviceUID 仍为 0，则回填为主键 ID
+	if dev.DeviceUID == 0 {
+		dev.DeviceUID = dev.ID
+		_ = database.DB.Model(&dev).Update("device_uid", dev.DeviceUID).Error
+	}
+	return dev.DeviceUID, nil
 }
 
 // 错误
@@ -100,7 +115,18 @@ func (p *ParentAuthBin) Handle(s *hub.Server, c *hub.Client, h bin.HeaderV1, pay
 		sendErr(s, c, h, 400, e.Error())
 		return
 	}
+	// 未审批设备：禁止加入网络与消息发送
+	var dev database.Device
+	if err := database.DB.Where("device_uid = ? OR id = ?", uid, uid).First(&dev).Error; err == nil {
+		if !dev.Approved {
+			sendErr(s, c, h, 403, "device not approved")
+			return
+		}
+	}
 	var sid [16]byte
+	// 成功后将连接标记为该设备，加入 Hub 客户端表
+	c.DeviceID = uid
+	s.Clients[c.DeviceID] = c
 	pl := bin.EncodeParentAuthResp(h.MsgID, uid, sid, 30, nil, 0, [32]byte{})
 	sendFrame(s, c, h, bin.TypeParentAuthResp, pl)
 }

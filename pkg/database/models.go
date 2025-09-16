@@ -27,6 +27,7 @@ type Device struct {
 	SecretKeyHash string     `gorm:"not null"`
 	HardwareID    string     `gorm:"unique"`
 	Role          DeviceRole `gorm:"type:varchar(20)"`
+	Approved      bool       `gorm:"default:false;index"` // 审批通过后方可使用网络功能
 	ParentID      *uint64
 	Parent        *Device  `gorm:"foreignKey:ParentID"`
 	Children      []Device `gorm:"foreignKey:ParentID"`

@@ -52,6 +52,7 @@ func (s *AuthService) AuthenticateManager(token string) (*database.Device, bool)
 				HardwareID:    "manager",
 				SecretKeyHash: string(hashedSecret),
 				Role:          database.RoleManager,
+				Approved:      true,
 				Name:          "System Manager",
 			}
 			if err := s.deviceRepo.Create(newManagerDevice); err != nil {
@@ -68,6 +69,10 @@ func (s *AuthService) AuthenticateManager(token string) (*database.Device, bool)
 	}
 	if managerDevice.DeviceUID == 0 {
 		managerDevice.DeviceUID = 10001
+		_ = s.deviceRepo.Update(managerDevice)
+	}
+	if !managerDevice.Approved {
+		managerDevice.Approved = true
 		_ = s.deviceRepo.Update(managerDevice)
 	}
 	return managerDevice, true

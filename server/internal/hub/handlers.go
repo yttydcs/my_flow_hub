@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"bytes"
 	"net/http"
 	"time"
 
@@ -58,7 +57,6 @@ func (c *Client) readPump() {
 		// 任何成功读取都刷新读超时，提升稳健性
 		c.lastReadAt = time.Now()
 		c.Conn.SetReadDeadline(c.lastReadAt.Add(pongWait))
-		message = bytes.TrimSpace(message)
 		if mt != websocket.BinaryMessage {
 			// 二进制专用：拒绝非二进制帧
 			continue

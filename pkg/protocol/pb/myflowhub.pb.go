@@ -21,7 +21,11 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// 基础应答
+// =============================================================
+// 基础应答（通用）
+// TypeID: 0 OK_RESP → OKResp, 1 ERR_RESP → ErrResp
+// 说明：用于承载通用成功/失败与消息文本，message 采用 bytes 以兼容任意编码。
+// =============================================================
 type OKResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RequestId     uint64                 `protobuf:"varint,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -142,7 +146,11 @@ func (x *ErrResp) GetMessage() []byte {
 	return nil
 }
 
-// 管理员/登录
+// =============================================================
+// 管理员/登录（用户自助）
+// TypeID: 110/111（登录），112/113（UserMe），114/115（登出）
+// 说明：登录返回 key_id/user_id/secret 以及权限快照。
+// =============================================================
 type ManagerAuthReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
@@ -555,7 +563,10 @@ func (x *UserLogoutReq) GetUserKey() string {
 	return ""
 }
 
-// 用户管理
+// =============================================================
+// 用户管理（管理员）
+// TypeID: 180~191（含权限与自助接口，见下节）
+// =============================================================
 type UserItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -984,7 +995,10 @@ func (x *UserDeleteReq) GetId() uint64 {
 	return 0
 }
 
-// 用户权限与自助修改
+// =============================================================
+// 用户权限与自助修改（管理员/用户自助）
+// TypeID: 186/187（权限列表），188（添加），189（移除），190（自助更新），191（自助改密）
+// =============================================================
 type UserPermListReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserKey       string                 `protobuf:"bytes,1,opt,name=user_key,json=userKey,proto3" json:"user_key,omitempty"`
@@ -1321,7 +1335,10 @@ func (x *UserSelfPasswordReq) GetNewPassword() string {
 	return ""
 }
 
-// 设备
+// =============================================================
+// 设备（Device）
+// TypeID: 20/120（查询），21（新建），22（更新），23（删除）
+// =============================================================
 type DeviceItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1334,6 +1351,7 @@ type DeviceItem struct {
 	LastSeenSec   *int64                 `protobuf:"varint,8,opt,name=last_seen_sec,json=lastSeenSec,proto3,oneof" json:"last_seen_sec,omitempty"`
 	CreatedAtSec  int64                  `protobuf:"varint,9,opt,name=created_at_sec,json=createdAtSec,proto3" json:"created_at_sec,omitempty"`
 	UpdatedAtSec  int64                  `protobuf:"varint,10,opt,name=updated_at_sec,json=updatedAtSec,proto3" json:"updated_at_sec,omitempty"`
+	Approved      *bool                  `protobuf:"varint,11,opt,name=approved,proto3,oneof" json:"approved,omitempty"` // 新增：审批状态
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1436,6 +1454,13 @@ func (x *DeviceItem) GetUpdatedAtSec() int64 {
 		return x.UpdatedAtSec
 	}
 	return 0
+}
+
+func (x *DeviceItem) GetApproved() bool {
+	if x != nil && x.Approved != nil {
+		return *x.Approved
+	}
+	return false
 }
 
 type QueryNodesReq struct {
@@ -1690,7 +1715,10 @@ func (x *DeleteDeviceReq) GetId() uint64 {
 	return 0
 }
 
-// 变量
+// =============================================================
+// 变量（Variables）
+// 说明：VarList/VarUpdate/VarDelete
+// =============================================================
 type VarListReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	UserKey       *string                `protobuf:"bytes,1,opt,name=user_key,json=userKey,proto3,oneof" json:"user_key,omitempty"`
@@ -2103,7 +2131,10 @@ func (x *VarDeleteReq) GetItems() []*VarDeleteItem {
 	return nil
 }
 
-// Key 管理
+// =============================================================
+// Key 管理（发放与查询）
+// 说明：包含绑定主体、到期与次数限制、节点范围等；nodes 为权限节点/设备路径（服务端定义）。
+// =============================================================
 type KeyItem struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Id              uint64                 `protobuf:"varint,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -2692,7 +2723,11 @@ func (x *KeyDevicesResp) GetDevices() []*DeviceItem {
 	return nil
 }
 
-// 系统日志
+// =============================================================
+// 系统日志（SystemLog）
+// TypeID: 150/151
+// 说明：Level/Source/Keyword 任意可选；时间范围允许 0 表示不限。
+// =============================================================
 type SystemLogItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Level         string                 `protobuf:"bytes,1,opt,name=level,proto3" json:"level,omitempty"`
@@ -2945,7 +2980,11 @@ func (x *SystemLogListResp) GetLogs() []*SystemLogItem {
 	return nil
 }
 
-// ParentAuth（保持与现有位宽一致）
+// =============================================================
+// ParentAuth（父链路认证）
+// TypeID: 130/131
+// 说明：字段长度与位宽需严格校验：nonce=16B, sig=32B；heartbeat_sec 仅低 16 位有效。
+// =============================================================
 type ParentAuthReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Version       uint32                 `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"` // 使用 uint32 以兼容 go 的读取；只占低 8 位
@@ -3224,7 +3263,7 @@ const file_myflowhub_proto_rawDesc = "" +
 	"\x13UserSelfPasswordReq\x12\x19\n" +
 	"\buser_key\x18\x01 \x01(\tR\auserKey\x12!\n" +
 	"\fold_password\x18\x02 \x01(\tR\voldPassword\x12!\n" +
-	"\fnew_password\x18\x03 \x01(\tR\vnewPassword\"\xf6\x02\n" +
+	"\fnew_password\x18\x03 \x01(\tR\vnewPassword\"\xa4\x03\n" +
 	"\n" +
 	"DeviceItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x04R\x02id\x12\x1d\n" +
@@ -3239,11 +3278,13 @@ const file_myflowhub_proto_rawDesc = "" +
 	"\rlast_seen_sec\x18\b \x01(\x03H\x02R\vlastSeenSec\x88\x01\x01\x12$\n" +
 	"\x0ecreated_at_sec\x18\t \x01(\x03R\fcreatedAtSec\x12$\n" +
 	"\x0eupdated_at_sec\x18\n" +
-	" \x01(\x03R\fupdatedAtSecB\f\n" +
+	" \x01(\x03R\fupdatedAtSec\x12\x1f\n" +
+	"\bapproved\x18\v \x01(\bH\x03R\bapproved\x88\x01\x01B\f\n" +
 	"\n" +
 	"_parent_idB\x10\n" +
 	"\x0e_owner_user_idB\x10\n" +
-	"\x0e_last_seen_sec\"<\n" +
+	"\x0e_last_seen_secB\v\n" +
+	"\t_approved\"<\n" +
 	"\rQueryNodesReq\x12\x1e\n" +
 	"\buser_key\x18\x01 \x01(\tH\x00R\auserKey\x88\x01\x01B\v\n" +
 	"\t_user_key\"c\n" +

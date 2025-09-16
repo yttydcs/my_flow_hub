@@ -98,6 +98,7 @@ message DeviceItem {
   optional int64  last_seen_sec = 8;
   int64 created_at_sec = 9;
   int64 updated_at_sec = 10;
+  optional bool  approved = 11; // 新增：审批状态
 }
 message QueryNodesReq { optional string user_key = 1; }
 message QueryNodesResp { uint64 request_id = 1; repeated DeviceItem devices = 2; }

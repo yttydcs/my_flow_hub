@@ -627,6 +627,7 @@ type DeviceItem struct {
 	LastSeenSec  *int64 // epoch seconds
 	CreatedAtSec int64  // epoch seconds
 	UpdatedAtSec int64  // epoch seconds
+	Approved     *bool  // 审批状态（可空）
 }
 
 // protobuf mapping helpers for DeviceItem
@@ -646,6 +647,11 @@ func toPBDeviceItem(d DeviceItem) *pb.DeviceItem {
 		v := *d.LastSeenSec
 		lastSeen = &v
 	}
+	var approved *bool
+	if d.Approved != nil {
+		v := *d.Approved
+		approved = &v
+	}
 	return &pb.DeviceItem{
 		Id:           d.ID,
 		DeviceUid:    d.DeviceUID,
@@ -657,6 +663,7 @@ func toPBDeviceItem(d DeviceItem) *pb.DeviceItem {
 		LastSeenSec:  lastSeen,
 		CreatedAtSec: d.CreatedAtSec,
 		UpdatedAtSec: d.UpdatedAtSec,
+		Approved:     approved,
 	}
 }
 
@@ -681,6 +688,10 @@ func fromPBDeviceItem(p *pb.DeviceItem) DeviceItem {
 	if p.LastSeenSec != nil {
 		v := p.GetLastSeenSec()
 		it.LastSeenSec = &v
+	}
+	if p.Approved != nil {
+		v := p.GetApproved()
+		it.Approved = &v
 	}
 	return it
 }

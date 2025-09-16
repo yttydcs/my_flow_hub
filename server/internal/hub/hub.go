@@ -2,10 +2,10 @@ package hub
 
 import (
 	"fmt"
+	"myflowhub/pkg/database"
 	bin "myflowhub/pkg/protocol/binproto"
 	"net/http"
 	"regexp"
-	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -39,9 +39,6 @@ type Server struct {
 		Error(source, message string, details any) error
 	} // updated interface to include Error method
 
-	// nonce cache for future ParentAuth anti-replay (reserved)
-	nonces   map[string]int64
-	noncesMu sync.Mutex
 }
 
 // isValidVarName 检查变量名是否有效
@@ -62,7 +59,6 @@ func NewServer(parentAddr, listenAddr, hardwareID string) *Server {
 		Register:   make(chan *Client),
 		Unregister: make(chan *Client),
 		binRoutes:  make(map[uint16]func(*Server, *Client, bin.HeaderV1, []byte)),
-		nonces:     make(map[string]int64),
 	}
 	return s
 }
@@ -114,6 +110,41 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 			return
 		}
 		log.Debug().Uint16("typeID", h.TypeID).Uint64("msgID", h.MsgID).Uint64("source", h.Source).Uint64("target", h.Target).Msg("收到二进制帧")
+		// 审批门控：认证类请求除外，未审批的连接拒绝后续操作
+		switch h.TypeID {
+		case bin.TypeManagerAuthReq, bin.TypeParentAuthReq, bin.TypeUserLoginReq, bin.TypeUserMeReq, bin.TypeUserLogoutReq:
+			// 认证与自助接口放行
+		default:
+			if sourceClient.DeviceID != 0 {
+				var approved bool
+				// 查询一次数据库；也可考虑加入缓存
+				var cnt int64
+				if err := database.DB.Model(&database.Device{}).
+					Where("device_uid = ? AND approved = ?", sourceClient.DeviceID, true).
+					Count(&cnt).Error; err == nil {
+					approved = cnt > 0
+				}
+				if !approved {
+					// 直接返回 ErrResp（禁止使用任何网络功能，也不能向其他节点发送消息）
+					pl := bin.EncodeErrResp(h.MsgID, 403, []byte("device not approved"))
+					frame, _ := bin.EncodeFrame(bin.HeaderV1{TypeID: bin.TypeErrResp, MsgID: h.MsgID, Source: s.DeviceID, Target: sourceClient.DeviceID, Timestamp: time.Now().UnixMilli()}, pl)
+					select {
+					case sourceClient.Send <- frame:
+					default:
+					}
+					return
+				}
+			} else {
+				// 未认证的连接亦禁止访问非认证接口
+				pl := bin.EncodeErrResp(h.MsgID, 401, []byte("unauthorized"))
+				frame, _ := bin.EncodeFrame(bin.HeaderV1{TypeID: bin.TypeErrResp, MsgID: h.MsgID, Source: s.DeviceID, Target: 0, Timestamp: time.Now().UnixMilli()}, pl)
+				select {
+				case sourceClient.Send <- frame:
+				default:
+				}
+				return
+			}
+		}
 		if handler, ok := s.binRoutes[h.TypeID]; ok {
 			handler(s, sourceClient, h, payload)
 			return
@@ -123,8 +154,27 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 			log.Warn().Msg("未注册 ManagerAuth 二进制处理器")
 		case bin.TypeParentAuthReq:
 			log.Warn().Msg("未注册 ParentAuth 二进制处理器（应由 binroutes 注册）")
+		case bin.TypeOKResp, bin.TypeErrResp:
+			// 某些客户端可能会向 Hub 回传通用响应帧；Hub 端无需处理，静默丢弃以减少噪音
+			// 附加诊断：打印头部十六进制，便于对齐问题排查
+			if len(hubMessage.Message) >= bin.HeaderSizeV1 {
+				hb := hubMessage.Message[:bin.HeaderSizeV1]
+				log.Debug().Uint16("typeID", h.TypeID).Uint64("msgID", h.MsgID).Str("hex", fmt.Sprintf("% x", hb)).Msg("收到通用响应帧，已忽略")
+			} else {
+				log.Debug().Uint16("typeID", h.TypeID).Uint64("msgID", h.MsgID).Int("len", len(hubMessage.Message)).Msg("收到通用响应帧，已忽略")
+			}
 		case bin.TypeMsgSend:
-			// 透传：当 Target ≠ Hub
+			// 自回环：当目标就是当前客户端自身 UID，直接回送一份，便于本地回环测试
+			if sourceClient.DeviceID != 0 && h.Target == sourceClient.DeviceID {
+				select {
+				case sourceClient.Send <- hubMessage.Message:
+					log.Debug().Uint64("target", h.Target).Msg("MSG_SEND 自回环回送给自身")
+				default:
+					log.Warn().Uint64("target", h.Target).Msg("自回环回送失败：channel 已满")
+				}
+				return
+			}
+			// 透传：当 Target ≠ Hub（自身设备）且 ≠ 广播
 			if h.Target != s.DeviceID && h.Target != 0 {
 				// 发往目标或上级，不解析 payload
 				if client, ok := s.Clients[h.Target]; ok {
@@ -159,7 +209,12 @@ func (s *Server) routeMessage(hubMessage *HubMessage) {
 				log.Info().Msg("MSG_SEND 发往 Hub，自行处理 payload（后续实现）")
 			}
 		default:
-			log.Warn().Uint16("typeID", h.TypeID).Msg("未知 TypeID")
+			if len(hubMessage.Message) >= bin.HeaderSizeV1 {
+				hb := hubMessage.Message[:bin.HeaderSizeV1]
+				log.Warn().Uint16("typeID", h.TypeID).Str("hex", fmt.Sprintf("% x", hb)).Msg("未知 TypeID")
+			} else {
+				log.Warn().Uint16("typeID", h.TypeID).Int("len", len(hubMessage.Message)).Msg("未知 TypeID")
+			}
 		}
 		return
 	}

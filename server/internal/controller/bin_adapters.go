@@ -22,6 +22,14 @@ func (a *AuthBin) ManagerAuth(s *hub.Server, c *hub.Client, h binproto.HeaderV1,
 		sendErr(s, c, h, 401, "unauthorized")
 		return
 	}
+	// Manager 免审批：若记录未审批则自动审批
+	var dev database.Device
+	if e := database.DB.Where("device_uid = ? OR id = ?", deviceUID, deviceUID).First(&dev).Error; e == nil {
+		if !dev.Approved {
+			dev.Approved = true
+			_ = database.DB.Model(&dev).Update("approved", true).Error
+		}
+	}
 	c.DeviceID = deviceUID
 	s.Clients[c.DeviceID] = c
 	pl := binproto.EncodeManagerAuthResp(h.MsgID, deviceUID, role)
@@ -99,7 +107,8 @@ func (d *DeviceBin) QueryNodes(s *hub.Server, c *hub.Client, h binproto.HeaderV1
 			v := dv.LastSeen.Unix()
 			last = &v
 		}
-		items = append(items, binproto.DeviceItem{ID: dv.ID, DeviceUID: dv.DeviceUID, HardwareID: dv.HardwareID, Role: string(dv.Role), Name: dv.Name, ParentID: parentID, OwnerUserID: ownerID, LastSeenSec: last, CreatedAtSec: dv.CreatedAt.Unix(), UpdatedAtSec: dv.UpdatedAt.Unix()})
+		appr := dv.Approved
+		items = append(items, binproto.DeviceItem{ID: dv.ID, DeviceUID: dv.DeviceUID, HardwareID: dv.HardwareID, Role: string(dv.Role), Name: dv.Name, ParentID: parentID, OwnerUserID: ownerID, LastSeenSec: last, CreatedAtSec: dv.CreatedAt.Unix(), UpdatedAtSec: dv.UpdatedAt.Unix(), Approved: &appr})
 	}
 	pl := binproto.EncodeQueryNodesResp(h.MsgID, items)
 	sendFrame(s, c, h, binproto.TypeQueryNodesResp, pl)
@@ -146,6 +155,9 @@ func (d *DeviceBin) Update(s *hub.Server, c *hub.Client, h binproto.HeaderV1, pa
 	}
 	if item.OwnerUserID != nil {
 		dev.OwnerUserID = item.OwnerUserID
+	}
+	if item.Approved != nil {
+		dev.Approved = *item.Approved
 	}
 	if e := d.C.UpdateDevice(uk, dev, c.DeviceID); e != nil {
 		sendErr(s, c, h, 403, "permission denied")

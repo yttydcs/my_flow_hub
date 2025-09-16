@@ -36,7 +36,8 @@ import {
   Analytics as VariableIcon,
   People as UsersIcon,
   Document as LogsIcon,
-  Key as KeyIcon
+  Key as KeyIcon,
+  ShieldCheckmark as ApproveIcon
 } from '@vicons/ionicons5'
 
 const router = useRouter()
@@ -53,7 +54,8 @@ const menuOptions = computed<MenuOption[]>(() => {
   const base: MenuOption[] = [
     { label: '设备管理', key: 'manage-devices', icon: () => h(DeviceIcon) },
   { label: '变量管理', key: 'manage-variables', icon: () => h(VariableIcon) },
-  { label: '密钥管理', key: 'manage-keys', icon: () => h(KeyIcon) }
+  { label: '密钥管理', key: 'manage-keys', icon: () => h(KeyIcon) },
+  { label: '设备审批', key: 'manage-approvals', icon: () => h(ApproveIcon) }
   ]
   if (auth.isAdmin) base.push({ label: '用户管理', key: 'manage-users', icon: () => h(UsersIcon) })
   const canViewLogs = auth.isAdmin || auth.permissions.includes('log.read')
@@ -72,6 +74,9 @@ const handleMenuSelect = (key: string) => {
       break
     case 'manage-keys':
       router.push('/manage/keys')
+      break
+    case 'manage-approvals':
+      router.push('/manage/approvals')
       break
     case 'manage-users':
       router.push('/manage/users')

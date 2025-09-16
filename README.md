@@ -18,7 +18,7 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
 | **核心网络** | | |
 | 统一服务端（中枢/中继） | ✅ 已实现 | 通过 `config.json` 配置。 |
 | 服务端自举注册 | ✅ 已实现 | 服务器启动时会在数据库中为自己创建持久化身份。 |
-| 节点动态注册与认证 | ✅ 已实现 | 客户端可通过 `hardwareId` 注册并获取数字ID和密钥。 |
+| 节点动态注册与认证 | ✅ 已实现 | 新节点可通过二进制认证（ParentAuth/ManagerAuth）接入；默认需要在 Manager 端审批后方可使用网络功能；持有 ManagerToken 的 Manager 节点可免审批直接加入。 |
 | 客户端身份持久化 | ✅ 已实现 | Web客户端使用 `localStorage`。 |
 | 并发安全的连接管理 | ✅ 已实现 | 采用 Hub-and-Spoke 模型，保证并发安全。 |
 | 分层消息路由 | ✅ 已实现 | 支持点对点、广播和向上传递。 |
@@ -120,6 +120,13 @@ MyFlowHub 是一个为物联网（IoT）和分布式系统设计的、轻量级�
     - 建议二者一致；避免与 `ManagerToken` 混用。
 
 Manager 角色澄清：Manager 只是前端的后端（BFF），负责 HTTP→Server 的中转，不再拥有系统级特权。ParentAuth 与 ManagerAuth 的密钥应分离。
+
+### 节点动态注册与认证
+
+- 设备/中继通过二进制 `ParentAuth` 发起接入，服务器根据 `hardware_id` 登记或查找设备记录。
+- 新登记设备 `Approved=false`，在 Manager 审批前无法使用任何网络功能，也不能向其他节点发送消息。
+- Manager 节点通过 `ManagerAuth` 接入：若提供有效 `ManagerToken`，将自动标记 `Approved=true` 并立即加入网络。
+- 管理端可增加“设备审批/拒绝”的管理界面（依据 devices.Approved 字段）。
 
 ## 默认管理员与首启规则
 

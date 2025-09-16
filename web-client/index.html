@@ -1,249 +1,287 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyFlowHub Web Client</title>
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyFlowHub Proto 客户端</title>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; margin: 0; }
-        #main { display: flex; flex: 1; }
-        #controls { padding: 1rem; border-right: 1px solid #ccc; display: flex; flex-direction: column; gap: 1rem; min-width: 350px; }
-        #log-container { flex: 1; padding: 1rem; overflow-y: auto; }
-        .log-entry { border-bottom: 1px solid #eee; padding: 0.5rem 0; font-family: monospace; white-space: pre-wrap; word-break: break-all; }
-        .log-entry.sent { color: blue; }
-        .log-entry.received { color: green; }
-        .log-entry.error { color: red; }
-        .log-entry.system { color: purple; }
-        input, button, textarea { padding: 0.5rem; width: 100%; box-sizing: border-box; }
+      :root { color-scheme: light dark; }
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; margin: 0; }
+      header { background: #111827; color: #fff; padding: 12px 16px; }
+      main { padding: 16px; display: grid; grid-template-columns: 340px 1fr; gap: 16px; align-items: start; }
+      fieldset { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; }
+      legend { font-weight: 600; letter-spacing: .5px; }
+      label { display: block; margin-top: 8px; font-size: 12px; color: #374151; }
+      input, button { margin-top: 4px; padding: 8px; font-size: 14px; }
+      .row { display: flex; gap: 8px; }
+      .row > * { flex: 1; }
+      #log { height: 64vh; overflow: auto; background: #0b1020; color: #d1d5db; padding: 10px; border-radius: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-size: 12px; }
+      .log-item { margin-bottom: 10px; border-bottom: 1px dashed #1f2937; padding-bottom: 8px; }
+      .tag { font-size: 10px; padding: 2px 6px; border-radius: 4px; margin-right: 6px; background: #374151; color: #e5e7eb; }
     </style>
-</head>
-<body>
-    <div id="main">
-        <div id="controls">
-            <h2>Controls</h2>
-            <div>
-                <label for="server-url">Server URL:</label>
-                <input type="text" id="server-url" value="ws://localhost:8080/ws">
-            </div>
-            <button id="connect-btn">Connect</button>
-            <hr>
-            <div>
-                <label for="hardware-id">My Hardware ID:</label>
-                <input type="text" id="hardware-id" value="web-client-hardware-001">
-            </div>
-            <div>
-                <label for="device-id">My Device ID (from server):</label>
-                <input type="text" id="device-id">
-            </div>
-             <div>
-                <label for="target-id">Target Device ID (for msg_send):</label>
-                <input type="text" id="target-id" value="0">
-            </div>
-            <hr>
-            <div>
-                <label for="message-content">Generic Message Payload (JSON):</label>
-                <textarea id="message-content" rows="3">{ "command": "ping" }</textarea>
-            </div>
-            <button id="send-msg-btn" disabled>Send Generic Msg</button>
-            <hr>
-            <div>
-                <label for="var-update-content">Variables to Update (JSON object):</label>
-                <textarea id="var-update-content" rows="4">{
-  "status": "online",
-  "(hub-001).load": 0.75
-}</textarea>
-            </div>
-            <button id="var-update-btn" disabled>Update Vars</button>
-            <hr>
-             <div>
-                <label for="vars-query">Queries (e.g., (hub-001).Name, [10002].status, my_var):</label>
-                <input type="text" id="vars-query" value="(hub-001).Name,status">
-            </div>
-            <button id="vars-query-btn" disabled>Query Variables</button>
+  </head>
+  <body>
+    <header><h1>MyFlowHub Web Proto Client</h1></header>
+    <main>
+      <section>
+        <fieldset>
+          <legend>连接</legend>
+          <label>WebSocket 地址</label>
+          <input id="wsUrl" value="ws://127.0.0.1:18080/ws" />
+          <div class="row">
+            <button id="btnConnect">连接</button>
+            <button id="btnDisconnect" disabled>断开</button>
+          </div>
+          <label>Manager Token</label>
+          <input id="token" placeholder="manager/config.json 中的 token" />
+          <div class="row">
+            <button id="btnManagerAuth" disabled>发送 ManagerAuth</button>
+          </div>
+        </fieldset>
+        <fieldset style="margin-top:12px">
+          <legend>ParentAuth 调试</legend>
+          <label>Relay/Shared Token（用于 HMAC）</label>
+          <input id="relayToken" placeholder="server/config.json 的 relayToken（或回退 managerToken）" />
+          <label>Hardware ID</label>
+          <input id="hardwareId" placeholder="设备硬件ID，例如 device-001" />
+          <label>Caps</label>
+          <input id="caps" placeholder="能力标记，如 relay|sensor，可留空" />
+          <div class="row">
+            <button id="btnParentAuth" disabled>发送 ParentAuth</button>
+          </div>
+        </fieldset>
+        <fieldset style="margin-top:12px">
+          <legend>消息发送（MSG_SEND）</legend>
+          <label>目标 Target UID（0=广播）</label>
+          <input id="targetUid" placeholder="输入设备UID，0 表示广播" />
+          <label>载荷 Payload</label>
+          <textarea id="payload" rows="4" placeholder="文本或十六进制"></textarea>
+          <div class="row">
+            <select id="payloadMode">
+              <option value="text">文本(UTF-8)</option>
+              <option value="hex">十六进制(如: 01 0a ff)</option>
+            </select>
+            <button id="btnSend">发送到目标</button>
+            <button id="btnBroadcast">广播发送</button>
+          </div>
+          <div style="margin-top:6px; font-size:12px; opacity:.8">当前连接设备UID：<span id="selfUid">(未知，需先认证)</span></div>
+        </fieldset>
+      </section>
+      <section>
+        <fieldset>
+          <legend>日志</legend>
+          <div id="log"></div>
+        </fieldset>
+      </section>
+    </main>
 
-        </div>
-        <div id="log-container">
-            <h2>Log</h2>
-            <div id="logs"></div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/protobufjs/dist/protobuf.min.js"></script>
+    <!-- protobufjs UMD -->
+    <script src="https://unpkg.com/protobufjs/dist/protobuf.min.js"></script>
     <script type="module">
-        import { decodeFrame, decodeProtobufPayload, Type } from './protocol.js';
-        const connectBtn = document.getElementById('connect-btn');
-        const sendMsgBtn = document.getElementById('send-msg-btn');
-        const varUpdateBtn = document.getElementById('var-update-btn');
-        const varsQueryBtn = document.getElementById('vars-query-btn');
+      import { Type, encodeFrame, decodeFrame, nextMsgID, decodeProtobufPayload, encodeManagerAuthReq, encodeParentAuthReq } from './protocol.js?v=3'
 
-        const serverUrlInput = document.getElementById('server-url');
-        const hardwareIdInput = document.getElementById('hardware-id');
-        const deviceIdInput = document.getElementById('device-id');
-        const targetIdInput = document.getElementById('target-id');
-        const messageContentInput = document.getElementById('message-content');
-        const varUpdateContentInput = document.getElementById('var-update-content');
-        const varsQueryInput = document.getElementById('vars-query');
-        const logsDiv = document.getElementById('logs');
+      const wsUrl = document.getElementById('wsUrl')
+      const token = document.getElementById('token')
+  const btnConnect = document.getElementById('btnConnect')
+      const btnDisconnect = document.getElementById('btnDisconnect')
+      const btnManagerAuth = document.getElementById('btnManagerAuth')
+  const relayToken = document.getElementById('relayToken')
+  const hardwareId = document.getElementById('hardwareId')
+  const caps = document.getElementById('caps')
+  const btnParentAuth = document.getElementById('btnParentAuth')
+      const logEl = document.getElementById('log')
+      const targetUid = document.getElementById('targetUid')
+      const payload = document.getElementById('payload')
+      const payloadMode = document.getElementById('payloadMode')
+      const btnSend = document.getElementById('btnSend')
+      const btnBroadcast = document.getElementById('btnBroadcast')
+      const selfUidEl = document.getElementById('selfUid')
 
-    let ws;
+      let ws = null
+      let currentDeviceUID = 0n
 
-        function setButtonsDisabled(disabled) {
-            sendMsgBtn.disabled = disabled;
-            varUpdateBtn.disabled = disabled;
-            varsQueryBtn.disabled = disabled;
-        }
+      function log(kind, text, obj) {
+        const div = document.createElement('div')
+        div.className = 'log-item'
+        const tag = document.createElement('span')
+        tag.className = 'tag'
+        tag.textContent = kind
+        const pre = document.createElement('pre')
+        pre.textContent = text + (obj ? '\n' + JSON.stringify(obj, null, 2) : '')
+        div.appendChild(tag)
+        div.appendChild(pre)
+        logEl.appendChild(div)
+        logEl.scrollTop = logEl.scrollHeight
+      }
 
-        function log(message, type = 'system') {
-            const entry = document.createElement('div');
-            entry.className = `log-entry ${type}`;
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-            logsDiv.prepend(entry);
-        }
-        
-        function sendMessage(type, payload, target = 0) {
-             if (!ws) {
-                log('Not connected.', 'error');
-                return;
-            }
+      function setConnected(on) {
+        btnConnect.disabled = on
+        btnDisconnect.disabled = !on
+        btnManagerAuth.disabled = !on
+        btnParentAuth.disabled = !on
+      }
+
+      btnConnect.addEventListener('click', () => {
+        if (ws) return
+        const url = wsUrl.value.trim()
+        ws = new WebSocket(url, 'myflowhub.bin.v1')
+        ws.binaryType = 'arraybuffer'
+        ws.onopen = () => { log('INFO', 'connected: ' + url); setConnected(true) }
+        ws.onclose = () => { log('INFO', 'closed'); setConnected(false); ws = null }
+        ws.onerror = () => { log('ERR', 'socket error') }
+        ws.onmessage = (ev) => {
+          if (!(ev.data instanceof ArrayBuffer)) { log('WARN', 'non-binary frame'); return }
+          const { header, payload } = decodeFrame(ev.data)
+          // 辅助：打印收到的头部原始字段
+          log('INFO', `RECV-HEADER type=${header.typeID} msgID=${header.msgID} src=${header.source} tgt=${header.target} ts=${header.timestamp}`)
+          const obj = decodeProtobufPayload(header.typeID, payload)
+          // 若无法以 protobuf 解码，展示十六进制与 UTF-8 预览
+          let extra = null
+          if (!obj && payload && payload.byteLength) {
+            const u8 = new Uint8Array(payload)
+            const hex = [...u8].map(b => b.toString(16).padStart(2,'0')).join(' ')
+            let text = ''
+            try { text = new TextDecoder().decode(u8) } catch {}
+            extra = { hex, text }
+          }
+          // 解码 OK/ERR 的 message（protobufjs bytes->String 为 base64）
+          let displayObj = obj || extra
+          if (obj && (header.typeID === Type.OK_RESP || header.typeID === Type.ERR_RESP) && typeof obj.message === 'string') {
             try {
-                const message = {
-                    id: crypto.randomUUID(),
-                    target: target,
-                    type: type,
-                    payload: payload
-                };
-                ws.send(JSON.stringify(message));
-                log(`Sent: ${JSON.stringify(message, null, 2)}`, 'sent');
-            } catch (e) {
-                log(`Error sending message: ${e.message}`, 'error');
-            }
+              const b64 = obj.message
+              const bin = atob(b64)
+              const arr = new Uint8Array(bin.length)
+              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+              const decoded = new TextDecoder().decode(arr)
+              displayObj = { ...obj, message: decoded }
+            } catch {}
+          }
+          log('RECV', `type=${header.typeID} msgID=${header.msgID} src=${header.source} tgt=${header.target} ts=${header.timestamp}`, displayObj)
+
+          // 捕获自身 UID（来自 ManagerAuthResp 或 ParentAuthResp）
+          if (header.typeID === Type.MANAGER_AUTH_RESP && obj && obj.device_uid) {
+            try { currentDeviceUID = BigInt(obj.device_uid) } catch { currentDeviceUID = 0n }
+            selfUidEl.textContent = currentDeviceUID.toString()
+          }
+          if (header.typeID === Type.PARENT_AUTH_RESP && obj && obj.device_uid) {
+            try { currentDeviceUID = BigInt(obj.device_uid) } catch { currentDeviceUID = 0n }
+            selfUidEl.textContent = currentDeviceUID.toString()
+          }
         }
+      })
 
-        function connect() {
-            const url = serverUrlInput.value;
-            try {
-                ws = new WebSocket(url, ['myflowhub.bin.v1']);
-            } catch (_) {
-                // 如果服务器未声明子协议，回退为无子协议
-                ws = new WebSocket(url);
-            }
-            ws.binaryType = 'arraybuffer';
+      btnDisconnect.addEventListener('click', () => { if (ws) ws.close() })
 
-            ws.onopen = () => {
-                log('Connected to server.', 'system');
-                connectBtn.textContent = 'Disconnect';
-
-                const specifiedId = deviceIdInput.value;
-                const storedId = localStorage.getItem(hardwareIdInput.value + '_deviceId');
-                const storedSecret = localStorage.getItem(hardwareIdInput.value + '_secretKey');
-
-                if (specifiedId) {
-                    log(`Using specified Device ID: ${specifiedId}`, 'system');
-                    const authPayload = { deviceId: parseInt(specifiedId, 10), secretKey: storedSecret || 'default-secret' };
-                    sendMessage("auth_request", authPayload);
-                    setButtonsDisabled(false);
-                } else if (storedId && storedSecret) {
-                    log(`Found stored credentials. Authenticating as Device ID: ${storedId}`, 'system');
-                    deviceIdInput.value = storedId;
-                    const authPayload = { deviceId: parseInt(storedId, 10), secretKey: storedSecret };
-                    sendMessage("auth_request", authPayload);
-                    setButtonsDisabled(false);
-                } else {
-                    log('No stored credentials. Registering as a new device...', 'system');
-                    const regPayload = { hardwareId: hardwareIdInput.value };
-                    sendMessage("register_request", regPayload);
-                }
-            };
-
-            ws.onmessage = (event) => {
-                if (typeof event.data === 'string') {
-                    // 旧 JSON 调试路径（如仍有服务返回文本）
-                    try {
-                        const msg = JSON.parse(event.data);
-                        log(`Received(JSON): ${JSON.stringify(msg, null, 2)}`, 'received');
-                    } catch {
-                        log(`Received(Text): ${event.data}`, 'received');
-                    }
-                    return;
-                }
-
-                // 二进制帧调试路径（Protobuf 负载）
-                const ab = event.data instanceof ArrayBuffer ? event.data : null;
-                if (!ab) {
-                    log('Received non-ArrayBuffer message.', 'error');
-                    return;
-                }
-                try {
-                    const { header, payload } = decodeFrame(ab);
-                    const headerPretty = {
-                        typeID: header.typeID,
-                        msgID: header.msgID?.toString?.() ?? String(header.msgID),
-                        source: header.source?.toString?.() ?? String(header.source),
-                        target: header.target?.toString?.() ?? String(header.target),
-                        timestamp: header.timestamp?.toString?.() ?? String(header.timestamp)
-                    };
-                    const decoded = decodeProtobufPayload(header.typeID, payload);
-                    log(`WS Bin Frame:\n${JSON.stringify({ header: headerPretty, decoded }, null, 2)}`, 'received');
-                } catch (e) {
-                    log(`Decode error: ${e.message}`, 'error');
-                }
-            };
-
-            ws.onerror = (error) => {
-                log(`WebSocket Error: ${JSON.stringify(error)}`, 'error');
-            };
-
-            ws.onclose = () => {
-                log('Disconnected from server.', 'system');
-                connectBtn.textContent = 'Connect';
-                setButtonsDisabled(true);
-                ws = null;
-            };
-    }
-
-        function disconnect() {
-            if (ws) {
-                ws.close();
-            }
+      btnManagerAuth.addEventListener('click', () => {
+        try {
+          if (!ws) { log('WARN', '尚未连接'); return }
+          const t = token.value.trim()
+          if (!t) { log('WARN', '请输入 token'); return }
+          const msgID = nextMsgID()
+          log('INFO', `准备发送 ManagerAuth (msgID=${msgID})`)
+          const payload = encodeManagerAuthReq(t)
+          const frame = encodeFrame(Type.MANAGER_AUTH_REQ, msgID, 0n, 0n, payload)
+          ws.send(frame)
+          log('SEND', `ManagerAuthReq (msgID=${msgID})`)
+        } catch (e) {
+          log('ERR', 'ManagerAuth 发送失败', { error: String(e) })
         }
+      })
 
-    connectBtn.addEventListener('click', () => {
-            if (ws) {
-                disconnect();
-            } else {
-                connect();
-            }
-        });
+      function parseHexToBytes(str) {
+        const clean = str.replace(/[^0-9a-fA-F]/g, ' ')
+        const parts = clean.trim().split(/\s+/).filter(Boolean)
+        const out = new Uint8Array(parts.length)
+        for (let i = 0; i < parts.length; i++) out[i] = parseInt(parts[i], 16) & 0xff
+        return out
+      }
 
-        sendMsgBtn.addEventListener('click', () => {
-            try {
-                const payload = JSON.parse(messageContentInput.value);
-                sendMessage("msg_send", payload, parseInt(targetIdInput.value, 10) || 0);
-            } catch (e) {
-                log(`Invalid JSON in message content: ${e.message}`, 'error');
-            }
-        });
+      function buildPayload() {
+        const mode = payloadMode.value
+        const text = payload.value || ''
+        if (mode === 'hex') return parseHexToBytes(text)
+        return new TextEncoder().encode(text)
+      }
 
-        varUpdateBtn.addEventListener('click', () => {
-            try {
-                const variables = JSON.parse(varUpdateContentInput.value);
-                const payload = { variables: variables };
-                sendMessage("var_update", payload);
-            } catch (e) {
-                log(`Invalid JSON in variables content: ${e.message}`, 'error');
-            }
-        });
+      function parseTarget(input) {
+        const s = (input || '').trim()
+        if (!s) return 0n
+        try { return BigInt(s) } catch { return 0n }
+      }
 
-        varsQueryBtn.addEventListener('click', () => {
-            const queries = varsQueryInput.value.split(',').map(q => q.trim()).filter(q => q);
-            if (queries.length > 0) {
-                const payload = { queries: queries };
-                sendMessage("vars_query", payload);
-            } else {
-                log('Please enter at least one query.', 'error');
-            }
-        });
+      function sendMsg(toUIDBigInt) {
+        if (!ws) { log('WARN', '未连接'); return }
+        const msgID = nextMsgID()
+        const src = currentDeviceUID || 0n
+        const pl = buildPayload()
+        const frame = encodeFrame(Type.MSG_SEND, msgID, src, toUIDBigInt, pl)
+        // 本地校验：打印前 38 字节十六进制，确认 TypeID=0a 00 开头
+        try {
+          const h = new Uint8Array(frame).slice(0, 38)
+          const hex = [...h].map(b => b.toString(16).padStart(2,'0')).join(' ')
+          log('INFO', 'LOCAL-HEADER-HEX ' + hex)
+        } catch {}
+        ws.send(frame)
+        log('INFO', `SEND-HEADER type=${Type.MSG_SEND} msgID=${msgID} src=${src} tgt=${toUIDBigInt} ts=${Date.now()}`)
+        log('SEND', `MSG_SEND (msgID=${msgID}) src=${src} tgt=${toUIDBigInt} bytes=${pl.length}`)
+      }
 
+      btnSend.addEventListener('click', () => {
+        const tgt = parseTarget(targetUid.value)
+        if (tgt === 0n) { log('WARN', '目标为0等同广播，请使用“广播发送”按钮'); return }
+        sendMsg(tgt)
+      })
+
+      btnBroadcast.addEventListener('click', () => {
+        sendMsg(0n)
+      })
+
+      // --- ParentAuth flow ---
+      async function hmacSha256(keyBytes, ...parts) {
+        const cryptoKey = await window.crypto.subtle.importKey(
+          'raw', keyBytes, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']
+        )
+        // concat parts
+        let total = 0
+        for (const p of parts) total += p.byteLength
+        const all = new Uint8Array(total)
+        let off = 0
+        for (const p of parts) { all.set(new Uint8Array(p), off); off += p.byteLength }
+        const sig = await window.crypto.subtle.sign('HMAC', cryptoKey, all)
+        return new Uint8Array(sig)
+      }
+
+      function u64le(nBig) {
+        const buf = new ArrayBuffer(8)
+        new DataView(buf).setBigUint64(0, BigInt(nBig), true)
+        return buf
+      }
+      function randomNonce16() {
+        const a = new Uint8Array(16)
+        window.crypto.getRandomValues(a)
+        return a
+      }
+
+      btnParentAuth.addEventListener('click', async () => {
+        try {
+          if (!ws) { log('WARN', '尚未连接'); return }
+          const k = relayToken.value.trim()
+          const hid = hardwareId.value.trim()
+          const cp = caps.value.trim()
+          if (!k || !hid) { log('WARN', '请输入 Relay/Shared Token 与 HardwareID'); return }
+          const tsMs = Date.now()
+          const nonce = randomNonce16()
+          log('INFO', `准备发送 ParentAuth ts=${tsMs} hw=${hid}`)
+          const sig = await hmacSha256(new TextEncoder().encode(k), u64le(BigInt(tsMs)), nonce, new TextEncoder().encode(hid), new TextEncoder().encode(cp))
+          const msgID = nextMsgID()
+          const payload = encodeParentAuthReq({ version: 1, tsMs, nonce, hardwareId: hid, caps: cp, sig })
+          const frame = encodeFrame(Type.PARENT_AUTH_REQ, msgID, 0n, 0n, payload)
+          ws.send(frame)
+          log('SEND', `ParentAuthReq (msgID=${msgID})`)
+        } catch (e) {
+          log('ERR', 'ParentAuth 发送失败', { error: String(e) })
+        }
+      })
     </script>
-</body>
+  </body>
 </html>
